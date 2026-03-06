@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "dev": "npm --prefix pinamungajan-hr-web run dev",
+    "build": "npm --prefix pinamungajan-hr-web run build",
+    "start": "npm --prefix pinamungajan-hr-web run start",
+    "lint": "npm --prefix pinamungajan-hr-web run lint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.95.3",
+    "dexie": "^4.3.0",
+    "zod": "^4.3.6"
+  }
+}

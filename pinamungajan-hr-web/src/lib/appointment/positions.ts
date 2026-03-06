@@ -1,0 +1,192 @@
+// Predefined list of municipal position titles for accurate extraction
+// These are standard positions in the Pinamungajan municipal government
+
+export const MUNICIPAL_POSITIONS = [
+  // Mayor and Council
+  "MUNICIPAL MAYOR I",
+  "MUNICIPAL VICE MAYOR I",
+  "SANGGUNIANG BAYAN MEMBER I",
+  "SANGGUNIANG BAYAN MEMBER (ABC PRESIDENT)",
+  "SANGGUNIANG BAYAN MEMBER (SKF PRESIDENT)",
+  "SECRETARY TO THE SANGGUNIANG BAYAN",
+  
+  // Department Heads
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL PLANNING AND DEVELOPMENT COORDINATOR)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL BUDGET OFFICER)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL ACCOUNTANT)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL CIVIL REGISTRAR)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL ASSESSOR)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL HEALTH OFFICER)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL SOCIAL WELFARE AND DEVELOPMENT OFFICER)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL TREASURER)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL AGRICULTURIST I)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (TOURISM OFFICER)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL ENGINEER)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD (MUNICIPAL ENVIRONMENT AND NATURAL RESOURCES)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (MUNICIPAL VETERINARIAN)",
+  "MUNICIPAL GOVERNMENT DEPARTMENT HEAD I (LOCAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICER)",
+  
+  // HR and Administrative
+  "HUMAN RESOURCE MANAGEMENT OFFICER II",
+  "ADMINISTRATIVE ASSISTANT II (HRMA)",
+  "ADMINISTRATIVE ASSISTANT I (COMPUTER OPERATOR I)",
+  "ADMINISTRATIVE OFFICER II (BUDGET OFFICER I)",
+  "ADMINISTRATIVE ASSISTANT II (BUDGETING ASSISTANT)",
+  "ADMINISTRATIVE OFFICER I (RECORDS OFFICER I)",
+  "ADMINISTRATIVE AIDE VI (ACCOUNTING CLERK II)",
+  "ADMINISTRATIVE OFFICER V (SUPPLY OFFICER III)",
+  "SUPPLY OFFICER II",
+  "INTERNAL AUDITOR III",
+  "INTERNAL AUDITOR II",
+  
+  // Administrative Aide positions
+  "ADMINISTRATIVE AIDE I",
+  "ADMINISTRATIVE AIDE II",
+  "ADMINISTRATIVE AIDE III (DRIVER I)",
+  "ADMINISTRATIVE AIDE IV (CLERK II)",
+  "ADMINISTRATIVE AIDE IV (CLERK I)",
+  "ADMINISTRATIVE AIDE IV (MECHANIC III)",
+  "ADMINISTRATIVE AIDE V (PLUMBER II)",
+  "ADMINISTRATIVE AIDE VI (CLERK III)",
+  "ADMINISTRATIVE AIDE VI (LABOR FOREMAN)",
+  "ADMINISTRATIVE AIDE VI (BOOKBINDER I)",
+  "ADMINISTRATIVE AIDE I (UTILITY WORKER I)",
+  "ADMINISTRATIVE AIDE I (COMPUTER OPERATOR I)",
+  "ADMINISTRATIVE AIDE II (UTILITY WORKER)",
+  "ADMINISTRATIVE AIDE I (LABORER I)",
+  "ADMINISTRATIVE AIDE I (UTILITY WORKER)",
+  
+  // Traffic and Security
+  "TRAFFIC OPERATIONS OFFICER I",
+  "TRAFFIC AIDE II",
+  "SECURITY OFFICER I",
+  "SECURITY GUARD II",
+  
+  // Planning
+  "PLANNING OFFICER II",
+  "PLANNING ASSISTANT",
+  
+  // Accounting
+  "ACCOUNTANT II",
+  "ADMINISTRATIVE ASSISTANT VI (COMPUTER OPERATOR III)",
+  
+  // Civil Registrar
+  "REGISTRATION OFFICER II",
+  
+  // Assessor
+  "TAX MAPPER I",
+  "LOCAL ASSESSMENT OPERATIONS OFFICER I",
+  
+  // Health
+  "MEDICAL OFFICER II",
+  "MEDICAL TECHNOLOGIST II",
+  "NURSE II",
+  "NURSE I",
+  "MIDWIFE III",
+  "MIDWIFE II",
+  "SANITATION INSPECTOR I",
+  "DENTAL AIDE",
+  
+  // Social Welfare
+  "SOCIAL WELFARE OFFICER III",
+  "DAY CARE WORKER I",
+  "SOCIAL WELFARE AIDE",
+  "YOUTH DEVELOPMENT OFFICER I",
+  
+  // Treasurer
+  "ADMINISTRATIVE OFFICER III (CASHIER II)",
+  "LICENSING OFFICER I",
+  "ADMINISTRATIVE OFFICER I (CASHIER I)",
+  "REVENUE COLLECTION CLERK I",
+  "LICENSE INSPECTOR II",
+  "ADMINISTRATIVE ASSISTANT II (CLERK IV)",
+  "REVENUE COLLECTION CLERK II",
+  "MARKET SUPERVISOR I",
+  "SLAUGHTERHOUSE MASTER I",
+  "MEAT INSPECTOR I",
+  
+  // Agriculture
+  "AGRICULTURIST II",
+  "AGRICULTURAL TECHNOLOGIST",
+  "AGRICULTURAL TECHNICIAN I",
+  "FARM WORKER II",
+  
+  // Tourism
+  "SENIOR TOURISM OPERATIONS OFFICER",
+  "TOURIST RECEPTIONIST I",
+  
+  // Engineering
+  "ENGINEER II",
+  "ENGINEERING ASSISTANT",
+  "HEAVY EQUIPMENT OPERATOR II",
+  "DRAFTSMAN I",
+  "ENGINEERING AIDE",
+  "WATERWORKS SUPERVISOR",
+  "METER READER II",
+  
+  // Environment
+  "ENVIRONMENTAL MANAGEMENT SPECIALIST II",
+  "FOREST RANGER",
+  
+  // Veterinary
+  "VETERINARIAN II",
+  "LIVESTOCK INSPECTOR I",
+  
+  // LDRRM
+  "LDRRM OFFICER III",
+  "LDRRM OFFICER II",
+  "LDRRM OFFICER I",
+  "LDRRM ASSISTANT",
+] as const;
+
+// Create a normalized map for fuzzy matching
+export const NORMALIZED_POSITIONS = MUNICIPAL_POSITIONS.map(pos => ({
+  original: pos,
+  normalized: pos.toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}));
+
+/**
+ * Find the best matching position from the predefined list
+ * Prioritizes longer matches and more specific titles
+ */
+export function findMatchingPosition(text: string): string | null {
+  const upperText = text.toUpperCase();
+  
+  // Sort by length (longest first) to prioritize more specific matches
+  const sortedPositions = [...NORMALIZED_POSITIONS].sort((a, b) => 
+    b.normalized.length - a.normalized.length
+  );
+  
+  for (const pos of sortedPositions) {
+    // Create a flexible pattern that handles common OCR errors
+    const pattern = pos.normalized
+      .replace(/[()]/g, '\\$&')  // Escape parentheses
+      .replace(/\s+/g, '\\s+')    // Flexible whitespace
+      .replace(/I+/g, '[I1l]+')   // I/1/l confusion
+      .replace(/V/g, '[VU]');      // V/U confusion
+    
+    const regex = new RegExp(`\\b${pattern}\\b`, 'i');
+    if (regex.test(upperText)) {
+      return pos.original;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract position from text using predefined list with fallback to regex
+ */
+export function extractPositionFromPredefined(text: string): string | null {
+  // Try predefined list first
+  const match = findMatchingPosition(text);
+  if (match) {
+    return match;
+  }
+  
+  return null;
+}
