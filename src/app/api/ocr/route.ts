@@ -333,6 +333,14 @@ export async function POST(request: Request) {
     docAiResult = processedDoc?.[0];
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const upper = msg.toUpperCase();
+    const looksLikeBilling = upper.includes("BILLING") || upper.includes("BILLINGACCOUNT") || upper.includes("CLOUD BILLING");
+    const looksLikePermission = upper.includes("PERMISSION_DENIED") || upper.includes("PERMISSION DENIED") || upper.includes("CODE 7");
+    const suggestion = looksLikeBilling
+      ? "Enable billing for your Google Cloud project, then ensure the Document AI API is enabled. After enabling, wait a few minutes and retry."
+      : looksLikePermission
+        ? "Ensure the Document AI API is enabled and your service account has the 'Document AI API User' role. Then retry."
+        : "Document AI is taking too long or failing. Check your internet connection and Google Cloud credentials.";
     console.error("[OCR] Document AI failed:", msg);
     
     // QUICK FALLBACK: Skip slow Tesseract, just use basic metadata
@@ -347,11 +355,11 @@ export async function POST(request: Request) {
       .eq("id", extractionId);
     
     return new NextResponse(
-      JSON.stringify({ 
-        error: "OCR failed", 
+      JSON.stringify({
+        error: "OCR failed",
         details: msg,
-        suggestion: "Document AI is taking too long or failing. Check your internet connection and Google Cloud credentials."
-      }), 
+        suggestion,
+      }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
