@@ -30,6 +30,7 @@ import { extractAppointmentFields, parseAppointmentDate } from "@/lib/appointmen
 import { extractPdsOwnerFromTextFallback } from "@/lib/ownerDetect/pdsOwner";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function normalizeNameForMatch(s: string) {
   return String(s || "")
@@ -314,7 +315,7 @@ export async function POST(request: Request) {
   let docAiResult: any;
   
   // FAST TIMEOUT: Don't let OCR hang for hours
-  const DOC_AI_TIMEOUT = 30000; // 30 seconds max
+  const DOC_AI_TIMEOUT = 55000; // keep under route maxDuration
   
   try {
     // Use the client-native timeout so the underlying request is actually cancelled.
