@@ -249,8 +249,23 @@ export async function POST(request: Request) {
   const batchDocs = await loadBatchDocuments();
   if (batchDocs.length === 0) return new NextResponse("No documents found", { status: 404 });
 
-  const client = createDocumentAiClient();
-  const name = getProcessorName();
+  let client: any;
+  let name = "";
+  try {
+    client = createDocumentAiClient();
+    name = getProcessorName();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return new NextResponse(
+      JSON.stringify({
+        error: "OCR is not configured",
+        details: msg,
+        suggestion:
+          "Set Vercel Environment Variables for Google Document AI: GCP_SERVICE_ACCOUNT_JSON, DOCUMENT_AI_LOCATION, DOCUMENT_AI_PROCESSOR_ID (and optionally GCP_PROJECT_ID). Then redeploy.",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
   const pages: Array<{
     document_id: string;
@@ -293,7 +308,7 @@ export async function POST(request: Request) {
     .sort((a, b) => (Number(a.page_index ?? 1e9) - Number(b.page_index ?? 1e9)) || String(a.document_id).localeCompare(String(b.document_id)));
 
   const pdfBuild = await buildMultipagePdfFromImages(
-    sortedPages.map((p) => ({ bytes: p.originalBytes, mimeType: p.originalMimeType, pageIndex: p.page_index, filename: p.filename }))
+    sortedPages.map((p) => ({ bytes: p.processedPng, mimeType: "image/png", pageIndex: p.page_index, filename: p.filename }))
   );
 
   let docAiResult: any;
