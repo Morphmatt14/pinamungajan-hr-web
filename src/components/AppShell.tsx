@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LogoutButton } from "@/components/LogoutButton";
+import { PlusCircle, ClipboardCheck, Users, Settings } from "lucide-react";
 
 export function AppShell({
   title,
@@ -9,26 +10,34 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-white">
-      <header className="border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-            <Link href="/" className="text-sm font-semibold text-blue-900">
-              Pinamungajan HR
+    <div className="min-h-screen bg-slate-50">
+      <header className="border-b border-blue-100 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
+            <Link href="/" className="flex items-center gap-3">
+              <img src="/logo.png" alt="Pinamungajan Logo" className="h-10 w-10 object-contain" />
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-blue-900 leading-tight">Pinamungajan HR</span>
+                <span className="text-xs font-semibold text-red-600 uppercase tracking-wider">Human Resources</span>
+              </div>
             </Link>
 
-            <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-700 sm:gap-3">
-              <Link className="rounded-md px-2 py-1 hover:bg-sky-100 hover:text-blue-900" href="/upload">
-                Upload
+            <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-700 sm:gap-3">
+              <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-emerald-50 hover:text-emerald-700 transition-colors" href="/upload">
+                <PlusCircle className="h-4 w-4" />
+                <span>Add Document</span>
               </Link>
-              <Link className="rounded-md px-2 py-1 hover:bg-sky-100 hover:text-blue-900" href="/review">
-                Review Queue
+              <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-amber-50 hover:text-amber-700 transition-colors" href="/review">
+                <ClipboardCheck className="h-4 w-4" />
+                <span>Pending Reviews</span>
               </Link>
-              <Link className="rounded-md px-2 py-1 hover:bg-sky-100 hover:text-blue-900" href="/masterlist">
-                Masterlist
+              <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-blue-50 hover:text-blue-700 transition-colors" href="/masterlist">
+                <Users className="h-4 w-4" />
+                <span>Masterlist</span>
               </Link>
-              <Link className="rounded-md px-2 py-1 hover:bg-amber-100 hover:text-amber-900" href="/settings">
-                Settings
+              <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-slate-100 hover:text-slate-900 transition-colors" href="/settings">
+                <Settings className="h-4 w-4" />
+                <span>Settings</span>
               </Link>
             </nav>
           </div>

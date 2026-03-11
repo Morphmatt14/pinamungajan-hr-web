@@ -15,6 +15,7 @@
     "@supabase/ssr": "^0.8.0",
     "docx": "^9.5.1",
     "konva": "^9.3.22",
+    "lucide-react": "^0.577.0",
     "next": "16.1.6",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.624",
