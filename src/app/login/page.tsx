@@ -4,6 +4,8 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
+import { Mail, KeyRound, Eye, EyeOff, LogIn } from "lucide-react";
+
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -84,47 +86,57 @@ function LoginPageInner() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-xl border bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold">Sign in</h1>
-        <p className="mt-1 text-sm text-zinc-800">
-          Use the account created in Supabase Authentication.
-        </p>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-md rounded-3xl border border-blue-100 bg-white p-8 shadow-sm">
+        <div className="flex flex-col items-center text-center">
+          <img src="/logo.png" alt="Pinamungajan Logo" className="h-20 w-20 object-contain drop-shadow-sm mb-4" />
+          <h1 className="text-2xl font-bold text-blue-900 leading-tight">Pinamungajan HR</h1>
+          <p className="mt-2 text-base text-slate-600">
+            Please sign in to access employee records and review pending documents.
+          </p>
+        </div>
 
-        <form className="mt-6 space-y-4" onSubmit={onSubmit}>
+        <form className="mt-8 space-y-5" onSubmit={onSubmit}>
           <div>
-            <label className="text-sm font-medium">Email</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <label className="text-sm font-semibold text-slate-700">Email Address</label>
+            <div className="relative mt-1.5 flex items-center">
+              <Mail className="absolute left-3 h-5 w-5 text-slate-400" />
+              <input
+                className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3 text-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                type="email"
+                placeholder="hr@pinamungajan.gov.ph"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
           </div>
 
           <div>
-            <label className="text-sm font-medium">Password</label>
-            <div className="mt-1 flex items-center gap-2">
+            <label className="text-sm font-semibold text-slate-700">Password</label>
+            <div className="relative mt-1.5 flex items-center">
+              <KeyRound className="absolute left-3 h-5 w-5 text-slate-400" />
               <input
-                className="w-full rounded-md border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-12 text-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
               <button
                 type="button"
-                className="shrink-0 rounded-md border px-3 py-2 text-xs hover:bg-zinc-50"
+                className="absolute right-3 p-1 text-slate-400 hover:text-slate-600 transition-colors"
                 onClick={() => setShowPassword((v) => !v)}
+                title={showPassword ? "Hide password" : "Show password"}
               >
-                {showPassword ? "Hide" : "Show"}
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
 
           {error ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700 text-center">
               {error}
             </div>
           ) : null}
@@ -132,9 +144,16 @@ function LoginPageInner() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition-all hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:hover:bg-blue-600"
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? (
+              "Signing in..."
+            ) : (
+              <>
+                <LogIn className="h-5 w-5" />
+                <span>Secure Sign In</span>
+              </>
+            )}
           </button>
         </form>
       </div>
