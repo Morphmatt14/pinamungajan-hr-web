@@ -1,4 +1,4 @@
-import Tesseract from "tesseract.js";
+import { createWorker } from "tesseract.js";
 import type { DocToken } from "../pds/documentAiTokens";
 
 /**
@@ -12,12 +12,16 @@ export async function performFallbackOcr(
   tokens: DocToken[];
   confidence: number;
 }> {
+  let worker: Tesseract.Worker | null = null;
   try {
-    const result = await Tesseract.recognize(imageBuffer, "eng", {
-      logger: (m) => {
-         // suppress spammy logs in production, but keep for debug if needed
-      },
+    // VERCEL TIMEOUT FIX: Force the "fast" Tesseract language model (11MB instead of 23MB)
+    // This halves download and processing times to fit within the 10-second Serverless limit constraint.
+    worker = await createWorker("eng", 1, {
+      logger: (m) => {},
+      langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
     });
+
+    const result = await worker.recognize(imageBuffer);
 
     const words: any[] = (result.data as any).words || [];
     const tokens: DocToken[] = [];
@@ -58,5 +62,9 @@ export async function performFallbackOcr(
   } catch (error) {
     console.error("[Tesseract] OCR failed:", error);
     throw error;
+  } finally {
+    if (worker) {
+      await worker.terminate();
+    }
   }
 }

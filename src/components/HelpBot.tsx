@@ -38,9 +38,10 @@ export function HelpBot() {
       {/* Floating Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-transform hover:scale-105 active:scale-95 ${isOpen ? "hidden" : "flex"}`}
+        className={`fixed bottom-6 right-6 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-white dark:bg-slate-900 border-2 border-blue-100 dark:border-blue-900 shadow-xl transition-all hover:scale-105 active:scale-95 hover:shadow-2xl animate-pulse ${isOpen ? "hidden" : "flex"}`}
+        title="Need Help?"
       >
-        <MessageCircle className="h-6 w-6" />
+        <img src="/logo.svg" alt="Help Bot" className="h-14 w-14 object-contain" />
       </button>
 
       {/* Chat Window */}

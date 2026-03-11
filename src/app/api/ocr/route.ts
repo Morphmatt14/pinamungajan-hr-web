@@ -277,10 +277,10 @@ export async function POST(request: Request) {
       const imgWidth = imgMetadata.width || 1000;
       const imgHeight = imgMetadata.height || 1000;
 
-      // VERCEL TIMEOUT FIX: Downscale the image to speed up Tesseract processing (target ~1200px width)
-      // High-res scans (300DPI) cause Tesseract to easily exceed Serverless 10-60s timeouts
+      // VERCEL TIMEOUT FIX: Downscale the image to speed up Tesseract processing (target ~800px width)
+      // High-res scans (300DPI) cause Tesseract to easily exceed Serverless 10s timeouts
       const resizedImageBuffer = await sharpMod(page.processedPng)
-        .resize({ width: 1200, withoutEnlargement: true })
+        .resize({ width: 800, withoutEnlargement: true })
         .toBuffer();
 
       const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
