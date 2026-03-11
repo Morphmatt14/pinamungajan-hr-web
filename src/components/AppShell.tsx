@@ -23,7 +23,7 @@ export function AppShell({
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
             <Link href="/" className="flex items-center gap-3">
-              <img src="/logo.svg" alt="Pinamungajan Logo" className="h-10 w-10 object-contain" />
+              <img src="/logo.png" alt="Pinamungajan Logo" className="h-10 w-10 object-contain" />
               <div className="flex flex-col">
                 <span className="text-lg font-bold text-blue-900 dark:text-blue-400 leading-tight">Pinamungajan HR</span>
                 <span className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">Human Resources</span>

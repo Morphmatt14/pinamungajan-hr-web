@@ -89,7 +89,7 @@ function LoginPageInner() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 sm:p-6 transition-colors">
       <div className="w-full max-w-md rounded-3xl border border-blue-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-sm transition-colors">
         <div className="flex flex-col items-center text-center">
-          <img src="/logo.svg" alt="Pinamungajan Logo" className="h-20 w-20 object-contain drop-shadow-sm mb-4" />
+          <img src="/logo.png" alt="Pinamungajan Logo" className="h-20 w-20 object-contain drop-shadow-sm mb-4" />
           <h1 className="text-2xl font-bold text-blue-900 dark:text-blue-400 leading-tight">Pinamungajan HR</h1>
           <p className="mt-2 text-base text-slate-600 dark:text-slate-400">
             Please sign in to access employee records and review pending documents.

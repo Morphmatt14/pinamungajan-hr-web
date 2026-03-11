@@ -19,9 +19,15 @@
   --foreground: #171717;
 }
 
-:root.dark {
+.dark:root,
+.dark body {
   --background: #0a0a0a;
   --foreground: #ededed;
+}
+
+:root.dark {
+  background-color: #0a0a0a;
+  color: #ededed;
 }
 
 body {

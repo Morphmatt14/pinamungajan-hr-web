@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createWorker, type Worker } from "tesseract.js";
+import type { DocToken } from "@/lib/pds/documentAiTokens";
 
 export function RunOcrButton({ extractionId }: { extractionId: string }) {
   const router = useRouter();
@@ -51,16 +53,55 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
   }
 
   async function run() {
+    let worker: Worker | null = null;
     try {
       setState({ status: "running" });
 
-      const url = `${window.location.origin}/api/ocr`;
+      // 1. Get the image URL for this extraction
+      // For simplicity, we assume the original upload is accessible. 
+      // We'll fetch the extraction metadata first to get the URL.
+      const metaRes = await fetch(`/api/extractions/${extractionId}`);
+      if (!metaRes.ok) throw new Error("Failed to fetch extraction metadata");
+      const meta = await metaRes.json();
+      
+      if (!meta?.file_url) throw new Error("No image file found for this document");
 
-      const res = await fetch(url, {
+      // 2. Perform OCR in the browser
+      worker = await createWorker("eng", 1, {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            // progress could be tracked here
+          }
+        },
+        langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
+      });
+
+      const ocrResult = await worker.recognize(meta.file_url);
+      const words = (ocrResult.data as any).words || [];
+      const tokens: DocToken[] = words.map((word: any) => ({
+        pageIndex: 0,
+        text: word.text,
+        confidence: word.confidence / 100,
+        box: {
+          minX: word.bbox.x0,
+          maxX: word.bbox.x1,
+          minY: word.bbox.y0,
+          maxY: word.bbox.y1,
+          midX: (word.bbox.x0 + word.bbox.x1) / 2,
+          midY: (word.bbox.y0 + word.bbox.y1) / 2,
+        },
+      }));
+
+      // 3. Send the pre-generated tokens to the backend
+      const res = await fetch(`${window.location.origin}/api/ocr`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ extraction_id: extractionId }),
+        body: JSON.stringify({ 
+          extraction_id: extractionId,
+          tokens: tokens,
+          full_text: ocrResult.data.text
+        }),
       });
 
       if (!res.ok) {
@@ -70,16 +111,17 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
       }
 
       setState({ status: "done" });
-      try {
-        router.refresh();
-      } catch {
-        // ignore
-      }
+      router.refresh();
     } catch (e) {
+      console.error("Client OCR Error:", e);
       setState({
         status: "error",
         message: e instanceof Error ? e.message : "Failed to run OCR",
       });
+    } finally {
+      if (worker) {
+        await worker.terminate();
+      }
     }
   }
 

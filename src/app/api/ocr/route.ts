@@ -216,6 +216,53 @@ export async function POST(request: Request) {
   const batchDocs = await loadBatchDocuments();
   if (batchDocs.length === 0) return new NextResponse("No documents found", { status: 404 });
 
+  // VERCEL TIMEOUT BYPASS: If client sent tokens, use them directly
+  if (body.tokens && body.full_text) {
+    const tokensAll: DocToken[] = body.tokens;
+    const fullTextAll: string = body.full_text;
+
+    // We still need the first document to build the searchable PDF (optional, but good for consistency)
+    const firstRow = batchDocs[0];
+    const firstDoc = firstRow.doc;
+    const originalBytes = await downloadDocBytes(firstDoc);
+
+    const searchableResult = await buildSearchablePdfFromOriginalAndTokens({
+      originalBytes,
+      originalMimeType: String(firstDoc.mime_type || "image/png"),
+      tokens: tokensAll,
+    });
+
+    const fileName = `searchable_${extractionId}.pdf`;
+    const storagePath = `ocr_pdfs/${extractionId}/${fileName}`;
+    const { error: uploadErr } = await supabase.storage
+      .from("ocr_results")
+      .upload(storagePath, searchableResult.bytes, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+
+    const { error: finalUpdateErr } = await supabase
+      .from("extractions")
+      .update({
+        status: "done",
+        raw_extracted_json: {
+          full_text: fullTextAll,
+          tokens: tokensAll,
+          searchable_pdf: {
+            storage_bucket: "ocr_results",
+            storage_path: storagePath,
+            filename: fileName,
+          },
+        },
+      })
+      .eq("id", extractionId);
+
+    if (finalUpdateErr) throw finalUpdateErr;
+
+    revalidatePath(`/review/${extractionId}`);
+    return NextResponse.json({ ok: true });
+  }
+
   // Setup Tesseract loop later
 
   const pages: Array<{
