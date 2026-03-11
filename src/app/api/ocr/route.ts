@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createDocumentAiClient, getProcessorName } from "@/lib/gcp/documentAi";
 import { extractOwnerFromTokensRoi } from "@/lib/pds2025/tokenRoiExtract";
 import { detectPdsTemplateVersionFromText } from "@/lib/pds/templateDetect";
 import { extractOwnerByAnchors } from "@/lib/pds/anchorOwnerExtract";
 import { extractOwnerFromTokensRoi2018 } from "@/lib/pds2018/tokenRoiExtract";
 import { computeAgeAndGroupFromDobIso } from "@/lib/age";
-import { getDocumentAiTokens } from "@/lib/pds/documentAiTokens";
+import { performFallbackOcr } from "@/lib/ocr/fallbackOcr";
+import type { DocToken } from "@/lib/pds/documentAiTokens";
 import { extractSexAtBirth } from "@/lib/pds/sexAtBirthExtract";
 import { buildSearchablePdfFromOriginalAndTokens } from "@/lib/pds/searchablePdf";
 import { extractDobFromPersonalInfoRow } from "@/lib/pds/dobRowExtract";
@@ -104,41 +104,7 @@ export async function POST(request: Request) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-  async function buildMultipagePdfFromImages(
-    pages: Array<{ bytes: Buffer; mimeType: string; pageIndex: number | null; filename: string | null }>
-  ): Promise<{ pdfBytes: Buffer; pageCount: number; pageIndexesUsed: number[] }> {
-    let sharpMod: any;
-    try {
-      sharpMod = (await import("sharp")).default;
-    } catch {
-      throw new Error("sharp not installed");
-    }
-
-    const pdf = await PDFDocument.create();
-    const pageIndexesUsed: number[] = [];
-
-    for (const p of pages) {
-      const mt = String(p.mimeType || "").toLowerCase();
-      if (mt === "application/pdf") {
-        throw new Error("Batch contains a PDF; upload only images for multi-page OCR");
-      }
-      if (!mt.startsWith("image/")) {
-        throw new Error(`Unsupported page mime type in batch: ${p.mimeType}`);
-      }
-
-      // Convert to PNG for deterministic embed + metadata.
-      const pngBytes = await sharpMod(p.bytes).png().toBuffer();
-      const img = await pdf.embedPng(pngBytes);
-      const w = img.width;
-      const h = img.height;
-      const page = pdf.addPage([w, h]);
-      page.drawImage(img, { x: 0, y: 0, width: w, height: h });
-      if (typeof p.pageIndex === "number" && Number.isFinite(p.pageIndex)) pageIndexesUsed.push(p.pageIndex);
-    }
-
-    const out = await pdf.save();
-    return { pdfBytes: Buffer.from(out), pageCount: pdf.getPageCount(), pageIndexesUsed };
-  }
+  // buildMultipagePdfFromImages was removed because Tesseract processes pages individually.
 
   let body: any;
   try {
@@ -250,23 +216,7 @@ export async function POST(request: Request) {
   const batchDocs = await loadBatchDocuments();
   if (batchDocs.length === 0) return new NextResponse("No documents found", { status: 404 });
 
-  let client: any;
-  let name = "";
-  try {
-    client = createDocumentAiClient();
-    name = getProcessorName();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return new NextResponse(
-      JSON.stringify({
-        error: "OCR is not configured",
-        details: msg,
-        suggestion:
-          "Set Vercel Environment Variables for Google Document AI: GCP_SERVICE_ACCOUNT_JSON, DOCUMENT_AI_LOCATION, DOCUMENT_AI_PROCESSOR_ID (and optionally GCP_PROJECT_ID). Then redeploy.",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  // Setup Tesseract loop later
 
   const pages: Array<{
     document_id: string;
@@ -308,66 +258,72 @@ export async function POST(request: Request) {
     .slice()
     .sort((a, b) => (Number(a.page_index ?? 1e9) - Number(b.page_index ?? 1e9)) || String(a.document_id).localeCompare(String(b.document_id)));
 
-  const pdfBuild = await buildMultipagePdfFromImages(
-    sortedPages.map((p) => ({ bytes: p.processedPng, mimeType: "image/png", pageIndex: p.page_index, filename: p.filename }))
-  );
-
-  let docAiResult: any;
+  const pdfBuild = { pageIndexesUsed: sortedPages.map(p => p.page_index ?? 0) };
   
-  // FAST TIMEOUT: Don't let OCR hang for hours
-  const DOC_AI_TIMEOUT = 55000; // keep under route maxDuration
-  
+  let fullTextAll = "";
+  const tokensAll: DocToken[] = [];
+  const pageCount = sortedPages.length;
+  let sharpMod: any;
   try {
-    // Use the client-native timeout so the underlying request is actually cancelled.
-    const processedDoc = await (client as any).processDocument(
-      {
-        name,
-        rawDocument: {
-          content: pdfBuild.pdfBytes,
-          mimeType: "application/pdf",
-        },
-      },
-      { timeout: DOC_AI_TIMEOUT }
-    );
-
-    docAiResult = processedDoc?.[0];
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const upper = msg.toUpperCase();
-    const looksLikeBilling = upper.includes("BILLING") || upper.includes("BILLINGACCOUNT") || upper.includes("CLOUD BILLING");
-    const looksLikePermission = upper.includes("PERMISSION_DENIED") || upper.includes("PERMISSION DENIED") || upper.includes("CODE 7");
-    const suggestion = looksLikeBilling
-      ? "Enable billing for your Google Cloud project, then ensure the Document AI API is enabled. After enabling, wait a few minutes and retry."
-      : looksLikePermission
-        ? "Ensure the Document AI API is enabled and your service account has the 'Document AI API User' role. Then retry."
-        : "Document AI is taking too long or failing. Check your internet connection and Google Cloud credentials.";
-    console.error("[OCR] Document AI failed:", msg);
-    
-    // QUICK FALLBACK: Skip slow Tesseract, just use basic metadata
-    // This prevents the 1-hour hang
-    await supabase
-      .from("extractions")
-      .update({
-        status: "error",
-        errors: { ocr: `Document AI failed: ${msg}. Please try again or check your Google Cloud credentials.` },
-        updated_by: user.id,
-      } as any)
-      .eq("id", extractionId);
-    
-    return new NextResponse(
-      JSON.stringify({
-        error: "OCR failed",
-        details: msg,
-        suggestion,
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    sharpMod = (await import("sharp")).default;
+  } catch {
+    throw new Error("sharp not installed");
   }
 
-  const document = docAiResult?.document;
-  const fullTextAll = document?.text || "";
-  const tokensAll = getDocumentAiTokens(document);
-  const pageCount = Array.isArray(document?.pages) ? document.pages.length : 0;
+  for (let i = 0; i < sortedPages.length; i++) {
+    const page = sortedPages[i];
+    try {
+      const imgMetadata = await sharpMod(page.processedPng).metadata();
+      const imgWidth = imgMetadata.width || 1000;
+      const imgHeight = imgMetadata.height || 1000;
+
+      const ocrResult = await performFallbackOcr(page.processedPng, i);
+      
+      fullTextAll += ocrResult.text + "\n\n";
+      
+      for (const t of ocrResult.tokens) {
+        tokensAll.push({
+          pageIndex: t.pageIndex,
+          text: t.text,
+          confidence: t.confidence,
+          box: {
+            minX: t.box.minX / imgWidth,
+            maxX: t.box.maxX / imgWidth,
+            minY: t.box.minY / imgHeight,
+            maxY: t.box.maxY / imgHeight,
+            midX: t.box.midX / imgWidth,
+            midY: t.box.midY / imgHeight,
+          }
+        });
+      }
+    } catch (err: any) {
+      console.error("[OCR] Fallback OCR failed for page", i, ":", err);
+      await supabase
+        .from("extractions")
+        .update({
+          status: "error",
+          errors: { ocr: `OCR failed: ${err.message}. Please try again.` },
+          updated_by: user.id,
+        } as any)
+        .eq("id", extractionId);
+      
+      return new NextResponse(
+        JSON.stringify({
+          error: "OCR failed",
+          details: err.message,
+          suggestion: "Tesseract OCR failed to process the image.",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  }
+
+  // Tesseract does not return a heavily structured `document` object like Google Document AI,
+  // but we can mock enough of it for downstream extractors that still rely on `document.text`.
+  const document = {
+    text: fullTextAll,
+    pages: sortedPages.map(() => ({ tokens: [] })) // Dummy structure for legacy code compatibility
+  };
 
   function pageTextFromTokens(pageIndex: number) {
     const toks = tokensAll.filter((t) => Number(t.pageIndex) === pageIndex);
