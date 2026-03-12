@@ -282,7 +282,7 @@ export async function POST(request: Request) {
 
   const pdfBuild = { pageIndexesUsed: sortedPages.map(p => p.page_index ?? 0) };
   
-  if (!hasClientTokens) {
+  if (!hasClientTokens || clientTokensToNormalize.length > 0) {
     let sharpMod: any;
     try {
       sharpMod = (await import("sharp")).default;
@@ -294,40 +294,58 @@ export async function POST(request: Request) {
       const page = sortedPages[i];
       try {
         const imgMetadata = await sharpMod(page.processedPng).metadata();
-        const imgWidth = imgMetadata.width || 1000;
-        const imgHeight = imgMetadata.height || 1000;
+        const resWidth = imgMetadata.width || 800;
+        const resHeight = imgMetadata.height || 800;
 
-        // VERCEL TIMEOUT FIX: Downscale the image to speed up Tesseract processing (target ~800px width)
-        const resizedImageMod = await sharpMod(page.processedPng)
-          .resize({ width: 800, withoutEnlargement: true });
-        
-        const resizedMetadata = await resizedImageMod.metadata();
-        const resWidth = resizedMetadata.width || 800;
-        const resHeight = resizedMetadata.height || 800;
-        
-        const resizedImageBuffer = await resizedImageMod.toBuffer();
-
-        const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
-        
-        fullTextAll += ocrResult.text + "\n\n";
-        
-        for (const t of ocrResult.tokens) {
-          tokensAll.push({
-            pageIndex: t.pageIndex,
-            text: t.text,
-            confidence: t.confidence,
-            box: {
-              minX: t.box.minX / resWidth,
-              maxX: t.box.maxX / resWidth,
-              minY: t.box.minY / resHeight,
-              maxY: t.box.maxY / resHeight,
-              midX: t.box.midX / resWidth,
-              midY: t.box.midY / resHeight,
-            }
-          });
+        if (!hasClientTokens) {
+          // Server-side OCR (fallback engine)
+          const resizedImageMod = await sharpMod(page.processedPng)
+            .resize({ width: 800, withoutEnlargement: true });
+          
+          const resizedMetadata = await resizedImageMod.metadata();
+          const rWidth = resizedMetadata.width || 800;
+          const rHeight = resizedMetadata.height || 800;
+          
+          const resizedImageBuffer = await resizedImageMod.toBuffer();
+          const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
+          
+          fullTextAll += ocrResult.text + "\n\n";
+          
+          for (const t of ocrResult.tokens) {
+            tokensAll.push({
+              pageIndex: t.pageIndex,
+              text: t.text,
+              confidence: t.confidence,
+              box: {
+                minX: t.box.minX / rWidth,
+                maxX: t.box.maxX / rWidth,
+                minY: t.box.minY / rHeight,
+                maxY: t.box.maxY / rHeight,
+                midX: t.box.midX / rWidth,
+                midY: t.box.midY / rHeight,
+              }
+            });
+          }
+        } else if (i === 0 && clientTokensToNormalize.length > 0) {
+          // Normalize client-provided tokens (assume they belong to page 1)
+          for (const t of clientTokensToNormalize) {
+            tokensAll.push({
+              pageIndex: 0,
+              text: t.text,
+              confidence: t.confidence,
+              box: {
+                minX: t.box.minX / resWidth,
+                maxX: t.box.maxX / resWidth,
+                minY: t.box.minY / resHeight,
+                maxY: t.box.maxY / resHeight,
+                midX: t.box.midX / resWidth,
+                midY: t.box.midY / resHeight,
+              }
+            });
+          }
         }
       } catch (err: any) {
-        console.error("[OCR] Fallback OCR failed for page", i, ":", err);
+        console.error("[OCR] OCR normalization/fallback failed for page", i, ":", err);
         await supabase
           .from("extractions")
           .update({
