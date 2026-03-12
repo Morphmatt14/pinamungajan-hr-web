@@ -222,11 +222,15 @@ export async function POST(request: Request) {
   let searchablePdfWarning: string | null = null;
   const pageCount = batchDocs.length;
 
-  // VERCEL TIMEOUT BYPASS: If client sent tokens, use them directly
+  // VERCEL TIMEOUT BYPASS: If client sent tokens, apply them
   const hasClientTokens = body.tokens && body.full_text;
   if (hasClientTokens) {
     tokensAll = body.tokens;
     fullTextAll = body.full_text;
+    
+    // NOTE: Client-side Tesseract tokens might be in absolute pixels.
+    // Extraction ROI logic requires normalized coordinates (0 to 1).
+    // We will normalize them later in the loop once we have the image dimensions.
   }
 
   // Setup Tesseract loop later
@@ -242,10 +246,13 @@ export async function POST(request: Request) {
     filename: string | null;
   }> = [];
 
-  // PERF: For PDS extraction we only need page 1 (personal information section).
-  // Processing all pages can take a very long time and cause the UI to appear hung.
+  // PERF: Processing all pages can take a very long time and cause timeouts.
+  // For PDS, we check up to 4 pages because page 1 (personal info) might not be the actual first file in a batch.
   const userSelectedTypeForOcrPaging = (extraction as any)?.doc_type_user_selected;
-  const maxOcrPages = userSelectedTypeForOcrPaging === "appointment" ? 3 : 1;
+  let maxOcrPages = 1;
+  if (userSelectedTypeForOcrPaging === "appointment") maxOcrPages = 3;
+  if (userSelectedTypeForOcrPaging === "pds") maxOcrPages = 4;
+  
   for (const row of batchDocs.slice(0, maxOcrPages)) {
     const doc = row.doc;
     if (!doc?.storage_bucket || !doc?.storage_path) continue;
@@ -289,9 +296,14 @@ export async function POST(request: Request) {
         const imgHeight = imgMetadata.height || 1000;
 
         // VERCEL TIMEOUT FIX: Downscale the image to speed up Tesseract processing (target ~800px width)
-        const resizedImageBuffer = await sharpMod(page.processedPng)
-          .resize({ width: 800, withoutEnlargement: true })
-          .toBuffer();
+        const resizedImageMod = await sharpMod(page.processedPng)
+          .resize({ width: 800, withoutEnlargement: true });
+        
+        const resizedMetadata = await resizedImageMod.metadata();
+        const resWidth = resizedMetadata.width || 800;
+        const resHeight = resizedMetadata.height || 800;
+        
+        const resizedImageBuffer = await resizedImageMod.toBuffer();
 
         const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
         
@@ -303,12 +315,12 @@ export async function POST(request: Request) {
             text: t.text,
             confidence: t.confidence,
             box: {
-              minX: t.box.minX / imgWidth,
-              maxX: t.box.maxX / imgWidth,
-              minY: t.box.minY / imgHeight,
-              maxY: t.box.maxY / imgHeight,
-              midX: t.box.midX / imgWidth,
-              midY: t.box.midY / imgHeight,
+              minX: t.box.minX / resWidth,
+              maxX: t.box.maxX / resWidth,
+              minY: t.box.minY / resHeight,
+              maxY: t.box.maxY / resHeight,
+              midX: t.box.midX / resWidth,
+              midY: t.box.midY / resHeight,
             }
           });
         }
@@ -413,6 +425,7 @@ export async function POST(request: Request) {
     // IMPORTANT: Keep the original full-text so textAnchor indices remain valid.
     // We only subset pages to make chosen page become pageIndex=0 for downstream extractors.
     text: fullTextAll,
+    tokens: (page1?.tokens || []).map((t: any) => ({ ...t, pageIndex: 0 })),
   };
 
   const templateAcross = (() => {

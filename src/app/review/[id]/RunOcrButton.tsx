@@ -77,18 +77,29 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
       });
 
       const ocrResult = await worker.recognize(meta.file_url);
+      
+      // 2.1 Get image dimensions for normalization
+      const img = new Image();
+      img.src = meta.file_url;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve; // Continue even if image fails to load for naturalWidth
+      });
+      const width = img.naturalWidth || 1000;
+      const height = img.naturalHeight || 1000;
+
       const words = (ocrResult.data as any).words || [];
       const tokens: DocToken[] = words.map((word: any) => ({
         pageIndex: 0,
         text: word.text,
         confidence: word.confidence / 100,
         box: {
-          minX: word.bbox.x0,
-          maxX: word.bbox.x1,
-          minY: word.bbox.y0,
-          maxY: word.bbox.y1,
-          midX: (word.bbox.x0 + word.bbox.x1) / 2,
-          midY: (word.bbox.y0 + word.bbox.y1) / 2,
+          minX: word.bbox.x0 / width,
+          maxX: word.bbox.x1 / width,
+          minY: word.bbox.y0 / height,
+          maxY: word.bbox.y1 / height,
+          midX: ((word.bbox.x0 + word.bbox.x1) / 2) / width,
+          midY: ((word.bbox.y0 + word.bbox.y1) / 2) / height,
         },
       }));
 

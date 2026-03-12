@@ -15,6 +15,13 @@ export type DocToken = {
 };
 
 export function getDocumentAiTokens(document: any): DocToken[] {
+  // If the document actually already contains the simplified token list (DocToken[]),
+  // return it directly. This allows us to use the same extractors for both 
+  // Google Document AI and our internal simplified token format.
+  if (Array.isArray(document?.tokens)) {
+    return document.tokens;
+  }
+
   const pages = (document?.pages || []) as any[];
   const fullText = String(document?.text || "");
   const out: DocToken[] = [];
