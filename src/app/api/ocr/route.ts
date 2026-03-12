@@ -222,15 +222,17 @@ export async function POST(request: Request) {
   let searchablePdfWarning: string | null = null;
   const pageCount = batchDocs.length;
 
+  let clientTokensToNormalize: any[] = [];
   // VERCEL TIMEOUT BYPASS: If client sent tokens, apply them
   const hasClientTokens = body.tokens && body.full_text;
   if (hasClientTokens) {
-    tokensAll = body.tokens;
+    const needsNormalization = body.tokens.some((t: any) => t.box.maxX > 2 || t.box.maxY > 2);
+    if (!needsNormalization) {
+      tokensAll = body.tokens;
+    } else {
+      clientTokensToNormalize = body.tokens;
+    }
     fullTextAll = body.full_text;
-    
-    // NOTE: Client-side Tesseract tokens might be in absolute pixels.
-    // Extraction ROI logic requires normalized coordinates (0 to 1).
-    // We will normalize them later in the loop once we have the image dimensions.
   }
 
   // Setup Tesseract loop later
