@@ -216,51 +216,17 @@ export async function POST(request: Request) {
   const batchDocs = await loadBatchDocuments();
   if (batchDocs.length === 0) return new NextResponse("No documents found", { status: 404 });
 
+  let fullTextAll = "";
+  let tokensAll: DocToken[] = [];
+  let searchablePdf: any = null;
+  let searchablePdfWarning: string | null = null;
+  const pageCount = batchDocs.length;
+
   // VERCEL TIMEOUT BYPASS: If client sent tokens, use them directly
-  if (body.tokens && body.full_text) {
-    const tokensAll: DocToken[] = body.tokens;
-    const fullTextAll: string = body.full_text;
-
-    // We still need the first document to build the searchable PDF (optional, but good for consistency)
-    const firstRow = batchDocs[0];
-    const firstDoc = firstRow.doc;
-    const originalBytes = await downloadDocBytes(firstDoc);
-
-    const searchableResult = await buildSearchablePdfFromOriginalAndTokens({
-      originalBytes,
-      originalMimeType: String(firstDoc.mime_type || "image/png"),
-      tokens: tokensAll,
-    });
-
-    const fileName = `searchable_${extractionId}.pdf`;
-    const storagePath = `ocr_pdfs/${extractionId}/${fileName}`;
-    const { error: uploadErr } = await supabase.storage
-      .from("ocr_results")
-      .upload(storagePath, searchableResult.bytes, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-
-    const { error: finalUpdateErr } = await supabase
-      .from("extractions")
-      .update({
-        status: "done",
-        raw_extracted_json: {
-          full_text: fullTextAll,
-          tokens: tokensAll,
-          searchable_pdf: {
-            storage_bucket: "ocr_results",
-            storage_path: storagePath,
-            filename: fileName,
-          },
-        },
-      })
-      .eq("id", extractionId);
-
-    if (finalUpdateErr) throw finalUpdateErr;
-
-    revalidatePath(`/review/${extractionId}`);
-    return NextResponse.json({ ok: true });
+  const hasClientTokens = body.tokens && body.full_text;
+  if (hasClientTokens) {
+    tokensAll = body.tokens;
+    fullTextAll = body.full_text;
   }
 
   // Setup Tesseract loop later
@@ -307,68 +273,99 @@ export async function POST(request: Request) {
 
   const pdfBuild = { pageIndexesUsed: sortedPages.map(p => p.page_index ?? 0) };
   
-  let fullTextAll = "";
-  const tokensAll: DocToken[] = [];
-  const pageCount = sortedPages.length;
-  let sharpMod: any;
-  try {
-    sharpMod = (await import("sharp")).default;
-  } catch {
-    throw new Error("sharp not installed");
+  if (!hasClientTokens) {
+    let sharpMod: any;
+    try {
+      sharpMod = (await import("sharp")).default;
+    } catch {
+      throw new Error("sharp not installed");
+    }
+
+    for (let i = 0; i < sortedPages.length; i++) {
+      const page = sortedPages[i];
+      try {
+        const imgMetadata = await sharpMod(page.processedPng).metadata();
+        const imgWidth = imgMetadata.width || 1000;
+        const imgHeight = imgMetadata.height || 1000;
+
+        // VERCEL TIMEOUT FIX: Downscale the image to speed up Tesseract processing (target ~800px width)
+        const resizedImageBuffer = await sharpMod(page.processedPng)
+          .resize({ width: 800, withoutEnlargement: true })
+          .toBuffer();
+
+        const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
+        
+        fullTextAll += ocrResult.text + "\n\n";
+        
+        for (const t of ocrResult.tokens) {
+          tokensAll.push({
+            pageIndex: t.pageIndex,
+            text: t.text,
+            confidence: t.confidence,
+            box: {
+              minX: t.box.minX / imgWidth,
+              maxX: t.box.maxX / imgWidth,
+              minY: t.box.minY / imgHeight,
+              maxY: t.box.maxY / imgHeight,
+              midX: t.box.midX / imgWidth,
+              midY: t.box.midY / imgHeight,
+            }
+          });
+        }
+      } catch (err: any) {
+        console.error("[OCR] Fallback OCR failed for page", i, ":", err);
+        await supabase
+          .from("extractions")
+          .update({
+            status: "error",
+            errors: { ocr: `OCR failed: ${err.message}. Please try again.` },
+            updated_by: user.id,
+          } as any)
+          .eq("id", extractionId);
+        
+        return new NextResponse(
+          JSON.stringify({
+            error: "OCR failed",
+            details: err.message,
+            suggestion: "Tesseract OCR failed to process the image.",
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
   }
 
-  for (let i = 0; i < sortedPages.length; i++) {
-    const page = sortedPages[i];
-    try {
-      const imgMetadata = await sharpMod(page.processedPng).metadata();
-      const imgWidth = imgMetadata.width || 1000;
-      const imgHeight = imgMetadata.height || 1000;
+  // BUILD SEARCHABLE PDF (Common for both paths if possible)
+  try {
+    const firstRow = batchDocs[0];
+    const firstDoc = firstRow.doc;
+    const originalBytes = await downloadDocBytes(firstDoc);
 
-      // VERCEL TIMEOUT FIX: Downscale the image to speed up Tesseract processing (target ~800px width)
-      // High-res scans (300DPI) cause Tesseract to easily exceed Serverless 10s timeouts
-      const resizedImageBuffer = await sharpMod(page.processedPng)
-        .resize({ width: 800, withoutEnlargement: true })
-        .toBuffer();
+    const searchableResult = await buildSearchablePdfFromOriginalAndTokens({
+      originalBytes,
+      originalMimeType: String(firstDoc.mime_type || "image/png"),
+      tokens: tokensAll,
+    });
 
-      const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
-      
-      fullTextAll += ocrResult.text + "\n\n";
-      
-      for (const t of ocrResult.tokens) {
-        tokensAll.push({
-          pageIndex: t.pageIndex,
-          text: t.text,
-          confidence: t.confidence,
-          box: {
-            minX: t.box.minX / imgWidth,
-            maxX: t.box.maxX / imgWidth,
-            minY: t.box.minY / imgHeight,
-            maxY: t.box.maxY / imgHeight,
-            midX: t.box.midX / imgWidth,
-            midY: t.box.midY / imgHeight,
-          }
-        });
-      }
-    } catch (err: any) {
-      console.error("[OCR] Fallback OCR failed for page", i, ":", err);
-      await supabase
-        .from("extractions")
-        .update({
-          status: "error",
-          errors: { ocr: `OCR failed: ${err.message}. Please try again.` },
-          updated_by: user.id,
-        } as any)
-        .eq("id", extractionId);
-      
-      return new NextResponse(
-        JSON.stringify({
-          error: "OCR failed",
-          details: err.message,
-          suggestion: "Tesseract OCR failed to process the image.",
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+    const fileName = `searchable_${extractionId}.pdf`;
+    const storagePath = `ocr_pdfs/${extractionId}/${fileName}`;
+    const { error: uploadErr } = await supabase.storage
+      .from("ocr_results")
+      .upload(storagePath, searchableResult.bytes, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+
+    if (!uploadErr) {
+      searchablePdf = {
+        storage_bucket: "ocr_results",
+        storage_path: storagePath,
+        filename: fileName,
+      };
     }
+  } catch (err) {
+    console.warn("[OCR] Searchable PDF generation failed:", err);
+    searchablePdfWarning = err instanceof Error ? err.message : "PDF build failed";
   }
 
   // Tesseract does not return a heavily structured `document` object like Google Document AI,
@@ -513,8 +510,6 @@ export async function POST(request: Request) {
   let ownerCandidate: any = null;
   let ownerEmployeeId: string | null = null;
   let ownerLinkWarning: string | null = null;
-  let searchablePdf: any = null;
-  let searchablePdfWarning: string | null = null;
   let photoDebug: any = { warnings: [] };
   
   // Variables for extraction debug (initialized for all types)
@@ -522,8 +517,6 @@ export async function POST(request: Request) {
   let roi: any = null;
   let sex: any = { value: null, debug: { method: null, male: null, female: null, densities: null, imageRois: null, reasons: [] } };
   let dobRow: any = { iso: null, debug: { rawDateMatch: null, usedRule: null, reasonsIfNull: [] } };
-  let rawDobCandidate: string = "";
-  let dobParsed: any = { iso: null, detectedFormat: "unknown", confidence: 0, reasonsIfNull: [] };
 
   if (docTypeFinal === "appointment") {
     const appointmentPage = pageViews[0];
@@ -1032,11 +1025,11 @@ export async function POST(request: Request) {
           dates: {
             ...((extraction as any).raw_extracted_json?.debug?.dates || null),
             dob: {
-              raw: rawDobCandidate || null,
-              iso: dobParsed.iso,
-              detectedFormat: (dobParsed as any).detectedFormat ?? "unknown",
-              confidence: (dobParsed as any).confidence ?? 0,
-              reasonsIfNull: dobParsed.iso ? [] : ((dobParsed as any).reasonsIfNull ?? []),
+              raw: null,
+              iso: null,
+              detectedFormat: "unknown",
+              confidence: 0,
+              reasonsIfNull: [],
             },
           },
           formFieldCount: null,
@@ -1112,8 +1105,8 @@ export async function POST(request: Request) {
           },
           searchablePdfWarning,
           dob: {
-            raw: (dobRow.debug.rawDateMatch ?? rawDobCandidate) || null,
-            parsedIso: dobRow.iso ?? dobParsed.iso,
+            raw: (dobRow.debug.rawDateMatch) || null,
+            parsedIso: dobRow.iso,
             parseRuleUsed: dobRow.debug.usedRule ?? null,
             reasonsIfNull: dobRow.iso ? [] : dobRow.debug.reasonsIfNull,
             rawDebug: dobRow.debug,
