@@ -112,5 +112,7 @@ export function createDocumentAiClient() {
 
 export function getProcessorName() {
   const { projectId, location, processorId } = getDocumentAiConfig();
-  return `projects/${projectId}/locations/${location}/processors/${processorId}`;
+  const fullName = `projects/${projectId}/locations/${location}/processors/${processorId}`;
+  console.log("[DEBUG DOC-AI] Full processor name:", fullName);
+  return fullName;
 }

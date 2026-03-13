@@ -14,11 +14,15 @@ export async function performFallbackOcr(
 }> {
   let worker: Tesseract.Worker | null = null;
   try {
-    // VERCEL TIMEOUT FIX: Force the "fast" Tesseract language model (11MB instead of 23MB)
-    // This halves download and processing times to fit within the 10-second Serverless limit constraint.
+    // Use custom worker path for Vercel serverless environment
+    const workerPath = process.env.VERCEL ? 
+      require.resolve('tesseract.js/dist/worker.min.js') : 
+      undefined;
+    
     worker = await createWorker("eng", 1, {
       logger: (m) => {},
       langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
+      ...(workerPath ? { workerPath } : {}),
     });
 
     const result = await worker.recognize(imageBuffer);
