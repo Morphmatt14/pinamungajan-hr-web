@@ -25,7 +25,21 @@ function parseServiceAccountJson(raw: string) {
 
 export function getDocumentAiConfig() {
   const credentialsJsonRaw = readEnv("GCP_SERVICE_ACCOUNT_JSON", "GOOGLE_CLOUD_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS_JSON");
+  
+  // DEBUG: Log what we received (hide sensitive parts)
+  console.log("[DEBUG DOC-AI] GCP_SERVICE_ACCOUNT_JSON length:", credentialsJsonRaw?.length || 0);
+  console.log("[DEBUG DOC-AI] First 100 chars:", credentialsJsonRaw?.substring(0, 100) || "EMPTY");
+  console.log("[DEBUG DOC-AI] Last 50 chars:", credentialsJsonRaw?.substring(credentialsJsonRaw.length - 50) || "EMPTY");
+  
   const credentials = credentialsJsonRaw ? parseServiceAccountJson(credentialsJsonRaw) : null;
+  
+  // DEBUG: Check if credentials parsed correctly
+  console.log("[DEBUG DOC-AI] Credentials parsed:", !!credentials);
+  if (credentials) {
+    console.log("[DEBUG DOC-AI] Project ID from creds:", credentials.project_id);
+    console.log("[DEBUG DOC-AI] Client email:", credentials.client_email);
+    console.log("[DEBUG DOC-AI] Has private_key:", !!credentials.private_key);
+  }
 
   // Local dev can use ADC via a file path, e.g. GOOGLE_APPLICATION_CREDENTIALS=C:\path\key.json
   // Note: Vercel cannot rely on local files, so production should use GCP_SERVICE_ACCOUNT_JSON.
@@ -35,6 +49,10 @@ export function getDocumentAiConfig() {
   const projectId = projectIdFromEnv || String(credentials?.project_id || "").trim();
   const location = readEnv("DOCUMENT_AI_LOCATION", "GCP_DOCUMENT_AI_LOCATION");
   const processorId = readEnv("DOCUMENT_AI_PROCESSOR_ID", "GCP_DOCUMENT_AI_PROCESSOR_ID");
+
+  console.log("[DEBUG DOC-AI] Final projectId:", projectId);
+  console.log("[DEBUG DOC-AI] Final location:", location);
+  console.log("[DEBUG DOC-AI] Final processorId:", processorId?.substring(0, 10) + "...");
 
   const missing: string[] = [];
   if (!projectId) missing.push("GCP_PROJECT_ID");
@@ -51,6 +69,7 @@ export function getDocumentAiConfig() {
 export function createDocumentAiClient() {
   const cfg = getDocumentAiConfig();
   if (cfg.credentials) {
+    console.log("[DEBUG DOC-AI] Creating client with credentials");
     return new DocumentProcessorServiceClient({ projectId: cfg.projectId, credentials: cfg.credentials });
   }
   // Use ADC (GOOGLE_APPLICATION_CREDENTIALS) if provided.
@@ -59,6 +78,7 @@ export function createDocumentAiClient() {
     // mirror it into the correct env var so Google auth can discover it.
     process.env.GOOGLE_APPLICATION_CREDENTIALS = cfg.adcPath;
   }
+  console.log("[DEBUG DOC-AI] Creating client with ADC");
   return new DocumentProcessorServiceClient({ projectId: cfg.projectId });
 }
 
