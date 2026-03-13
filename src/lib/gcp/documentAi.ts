@@ -11,14 +11,36 @@ function readEnv(...keys: string[]) {
 function parseServiceAccountJson(raw: string) {
   const v = String(raw || "").trim();
   if (!v) return null;
+  
+  // Try parsing as-is first
   try {
-    return JSON.parse(v);
+    const parsed = JSON.parse(v);
+    // Fix private_key newlines if needed
+    if (parsed.private_key && typeof parsed.private_key === 'string') {
+      parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+    }
+    return parsed;
   } catch {
-    // Support Vercel-style single-line JSON with escaped newlines.
+    // Try removing outer quotes if present (Vercel sometimes adds them)
     try {
-      return JSON.parse(v.replace(/\\n/g, "\n"));
+      const unquoted = v.replace(/^"/, "").replace(/"$/, "");
+      const parsed = JSON.parse(unquoted);
+      if (parsed.private_key && typeof parsed.private_key === 'string') {
+        parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+      }
+      return parsed;
     } catch {
-      return null;
+      // Try with unescaping
+      try {
+        const unescaped = v.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        const parsed = JSON.parse(unescaped);
+        if (parsed.private_key && typeof parsed.private_key === 'string') {
+          parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+        }
+        return parsed;
+      } catch {
+        return null;
+      }
     }
   }
 }
@@ -39,6 +61,12 @@ export function getDocumentAiConfig() {
     console.log("[DEBUG DOC-AI] Project ID from creds:", credentials.project_id);
     console.log("[DEBUG DOC-AI] Client email:", credentials.client_email);
     console.log("[DEBUG DOC-AI] Has private_key:", !!credentials.private_key);
+    if (credentials.private_key) {
+      const pk = credentials.private_key;
+      console.log("[DEBUG DOC-AI] Private key starts with:", pk.substring(0, 30));
+      console.log("[DEBUG DOC-AI] Private key contains newlines:", pk.includes("\n"));
+      console.log("[DEBUG DOC-AI] Private key length:", pk.length);
+    }
   }
 
   // Local dev can use ADC via a file path, e.g. GOOGLE_APPLICATION_CREDENTIALS=C:\path\key.json
