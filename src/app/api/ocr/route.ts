@@ -352,7 +352,7 @@ export async function POST(request: Request) {
     if (didDocAi) {
       // no-op, we already populated fullTextAll + tokensAll
     } else {
-    const allowFallbackOcr = String(process.env.ALLOW_FALLBACK_OCR || "").trim() === "1";
+    const allowFallbackOcr = String(process.env.ALLOW_FALLBACK_OCR || "1").trim() === "1" || String(process.env.ALLOW_FALLBACK_OCR || "").toLowerCase() === "true";
     if (!allowFallbackOcr && !hasClientTokens) {
       return new NextResponse(
         JSON.stringify({
