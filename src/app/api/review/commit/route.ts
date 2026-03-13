@@ -314,11 +314,25 @@ export async function POST(request: Request) {
 
   if (candErr) return new NextResponse(candErr.message, { status: 400 });
 
-  const normKey = normalizeNameForMatch(`${last} ${first} ${ownerCandidate.middle_name || ""}`);
+  // Match based on last_name and first_name only (middle name can differ due to OCR variations)
+  const normKey = normalizeNameForMatch(`${last} ${first}`);
 
   const possible = (candidates || []).filter((c: any) => {
-    const cKey = normalizeNameForMatch(`${c.last_name || ""} ${c.first_name || ""} ${c.middle_name || ""}`);
+    const cKey = normalizeNameForMatch(`${c.last_name || ""} ${c.first_name || ""}`);
     if (cKey !== normKey) return false;
+    // Also check if middle names are compatible (one could be initial of the other)
+    const ownerMiddle = String(ownerCandidate.middle_name || "").toUpperCase().trim();
+    const candMiddle = String(c.middle_name || "").toUpperCase().trim();
+    if (ownerMiddle && candMiddle) {
+      // If middle names are different, check if one is an initial of the other
+      // e.g., "N" vs "Napoles" or "N." vs "Napoles"
+      const ownerInitial = ownerMiddle.charAt(0);
+      const candInitial = candMiddle.charAt(0);
+      // Allow match if initials match or one contains the other
+      if (ownerInitial !== candInitial && !ownerMiddle.includes(candMiddle) && !candMiddle.includes(ownerMiddle)) {
+        return false;
+      }
+    }
     return looksLikeSamePersonLoose(ownerCandidate, c);
   });
 

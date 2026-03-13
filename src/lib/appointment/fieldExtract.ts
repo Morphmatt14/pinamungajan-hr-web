@@ -365,7 +365,8 @@ export function parseAppointmentDate(
 
 /**
  * Extract owner name from appointment form using text-based regex
- * Format: MR. FIRSTNAME MIDDLE LASTNAME (e.g., "MR. ADONIS T. ABABAN")
+ * Format: DR. FIRSTNAME MIDDLE LASTNAME (e.g., "DR. TOMOMI N. ABE")
+ * Also handles: "FIRSTNAME M. LASTNAME, M.D." format
  */
 function extractOwnerFromAppointmentText(fullText: string): {
   last_name: string;
@@ -374,22 +375,68 @@ function extractOwnerFromAppointmentText(fullText: string): {
 } | null {
   const text = fullText.toUpperCase();
   
-  // Pattern 1: MR./MS./MRS. followed by name (FIRST MIDDLE LAST format)
-  const titleMatch = text.match(/M(?:R|RS|S)\.?\s+([A-Z]+(?:\s+[A-Z]\.?)?\s+[A-Z]+)/i);
+  // Pattern 1: DR./MR./MS./MRS. followed by name (FIRST MIDDLE LAST format)
+  // Handles: "DR. TOMOMI N. ABE" or "MR. ADONIS T. ABABAN"
+  const titleMatch = text.match(/\b(DR|M(?:R|RS|S))\.?\s+([A-Z]+(?:\s+[A-Z]\.?)?\s+[A-Z]+)(?:,\s*(M\.?D\.?|PH\.?D\.?|JR\.?|SR\.?))?/i);
   if (titleMatch) {
-    const namePart = titleMatch[1].trim();
+    const namePart = titleMatch[2].trim();
+    const suffix = titleMatch[3] || "";
     const parts = namePart.split(/\s+/);
     
     if (parts.length >= 2) {
-      // Last token is last name
+      // Last token is last name (before any suffix)
       const lastName = parts[parts.length - 1];
       // First token is first name
       const firstName = parts[0];
-      // Middle is everything in between
+      // Middle is everything in between (could be "N" or "N." or empty)
       const middleParts = parts.slice(1, parts.length - 1);
-      const middleName = middleParts.join(" ") || undefined;
+      const middleName = middleParts.join(" ").replace(/\.$/, "") || undefined;
       
       if (lastName && firstName) {
+        return {
+          last_name: lastName,
+          first_name: firstName,
+          middle_name: middleName,
+        };
+      }
+    }
+  }
+  
+  // Pattern 2: Name followed by M.D./PH.D. (e.g., "TOMOMI N. ABE, M.D.")
+  const suffixMatch = text.match(/\b([A-Z]+(?:\s+[A-Z]\.?)?\s+[A-Z]+),?\s*(M\.?D\.?|PH\.?D\.?)/i);
+  if (suffixMatch) {
+    const namePart = suffixMatch[1].trim();
+    const parts = namePart.split(/\s+/);
+    
+    if (parts.length >= 2) {
+      const lastName = parts[parts.length - 1];
+      const firstName = parts[0];
+      const middleParts = parts.slice(1, parts.length - 1);
+      const middleName = middleParts.join(" ").replace(/\.$/, "") || undefined;
+      
+      if (lastName && firstName) {
+        return {
+          last_name: lastName,
+          first_name: firstName,
+          middle_name: middleName,
+        };
+      }
+    }
+  }
+  
+  // Pattern 3: Look for "You are hereby appointed" and extract name before it
+  const appointedContext = text.match(/([A-Z][A-Z\s\.]+)(?:,\s*(M\.?D\.?|PH\.?D\.?))?\s+YOU\s+ARE\s+HEREBY\s+APPOINTED/i);
+  if (appointedContext) {
+    const namePart = appointedContext[1].trim();
+    const parts = namePart.split(/\s+/).filter(p => p && p !== "DR" && p !== "DR.");
+    
+    if (parts.length >= 2) {
+      const lastName = parts[parts.length - 1];
+      const firstName = parts[0];
+      const middleParts = parts.slice(1, parts.length - 1);
+      const middleName = middleParts.join(" ").replace(/\.$/, "") || undefined;
+      
+      if (lastName && firstName && lastName.length > 1 && firstName.length > 1) {
         return {
           last_name: lastName,
           first_name: firstName,
