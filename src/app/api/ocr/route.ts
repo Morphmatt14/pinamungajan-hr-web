@@ -411,7 +411,7 @@ export async function POST(request: Request) {
           const rHeight = resizedMetadata.height || 800;
           
           const resizedImageBuffer = await resizedImageMod.toBuffer();
-          const ocrResult = await withTimeout(performFallbackOcr(resizedImageBuffer, i), 20_000, `fallback_ocr_page_${i}`);
+          const ocrResult = await withTimeout(performFallbackOcr(resizedImageBuffer, i), 60_000, `fallback_ocr_page_${i}`);
           
           fullTextAll += ocrResult.text + "\n\n";
           
