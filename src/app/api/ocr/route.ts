@@ -6,8 +6,9 @@ import { extractOwnerByAnchors } from "@/lib/pds/anchorOwnerExtract";
 import { extractOwnerFromTokensRoi2018 } from "@/lib/pds2018/tokenRoiExtract";
 import { computeAgeAndGroupFromDobIso } from "@/lib/age";
 import { performFallbackOcr } from "@/lib/ocr/fallbackOcr";
-import type { DocToken } from "@/lib/pds/documentAiTokens";
 import { extractSexAtBirth } from "@/lib/pds/sexAtBirthExtract";
+import { getDocumentAiTokens, remapTokensToLegalSpace, type DocToken } from "@/lib/pds/documentAiTokens";
+import { createDocumentAiClient, getProcessorName } from "@/lib/gcp/documentAi";
 import { buildSearchablePdfFromOriginalAndTokens } from "@/lib/pds/searchablePdf";
 import { extractDobFromPersonalInfoRow } from "@/lib/pds/dobRowExtract";
 import { parsePdsDobToIso, safeParseDateToIso, validateDobToIso, validatePersonName } from "@/lib/pds/validators";
@@ -30,7 +31,34 @@ import { extractAppointmentFields, parseAppointmentDate } from "@/lib/appointmen
 import { extractPdsOwnerFromTextFallback } from "@/lib/ownerDetect/pdsOwner";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout:${label}`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
+async function buildMultipagePdfFromPngs(pngPages: Buffer[]) {
+  const pdfDoc = await PDFDocument.create();
+  for (const png of pngPages) {
+    const img = await pdfDoc.embedPng(png);
+    const page = pdfDoc.addPage([img.width, img.height]);
+    page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+  }
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
 
 function normalizeNameForMatch(s: string) {
   return String(s || "")
@@ -200,16 +228,25 @@ export async function POST(request: Request) {
   }
 
   function scorePage1FromText(text: string) {
-    const u = String(text || "").toUpperCase();
+    const u = String(text || "").toUpperCase().replace(/\s+/g, "");
     let score = 0;
-    if (u.includes("PERSONAL DATA SHEET")) score += 50;
-    if (u.includes("CS FORM") && u.includes("212")) score += 60;
+    
+    // Use joined text (no spaces) to be resilient to OCR spacing errors
+    if (u.includes("PERSONALDATASHEET")) score += 50;
+    if (u.includes("CSFORM") && u.includes("212")) score += 60;
+    if (u.includes("REVISED2017") || u.includes("REVISED2018") || u.includes("REVISED2025")) score += 30;
     if (u.includes("PERSONAL") && u.includes("INFORMATION")) score += 80;
     if (u.includes("SURNAME")) score += 35;
-    if (u.includes("FIRST") && u.includes("NAME")) score += 20;
-    if (u.includes("MIDDLE") && u.includes("NAME")) score += 20;
-    if (u.includes("DATE") && u.includes("BIRTH")) score += 20;
-    if (u.includes("SEX")) score += 10;
+    if (u.includes("FIRSTNAME")) score += 20;
+    if (u.includes("MIDDLENAME")) score += 20;
+    if (u.includes("DATEOFBIRTH") || u.includes("BIRTHDATE")) score += 25;
+    if (u.includes("SEXATBIRTH") || (u.includes("SEX") && u.includes("BIRTH"))) score += 15;
+    
+    // Add additional PDS-specific anchors for page 1
+    if (u.includes("CIVILSTATUS")) score += 10;
+    if (u.includes("CITIZENSHIP")) score += 10;
+    if (u.includes("RESIDENCETAX")) score += 10;
+    
     return score;
   }
 
@@ -281,8 +318,53 @@ export async function POST(request: Request) {
     .sort((a, b) => (Number(a.page_index ?? 1e9) - Number(b.page_index ?? 1e9)) || String(a.document_id).localeCompare(String(b.document_id)));
 
   const pdfBuild = { pageIndexesUsed: sortedPages.map(p => p.page_index ?? 0) };
-  
+
   if (!hasClientTokens || clientTokensToNormalize.length > 0) {
+    let didDocAi = false;
+    let docAiErrMsg = "";
+    try {
+      const client = createDocumentAiClient();
+      const name = getProcessorName();
+      const pdfBytes = await buildMultipagePdfFromPngs(sortedPages.map((p) => p.processedPng));
+      const DOC_AI_TIMEOUT = 180000;
+      const processedDoc = await (client as any).processDocument(
+        {
+          name,
+          rawDocument: {
+            content: pdfBytes,
+            mimeType: "application/pdf",
+          },
+        },
+        { timeout: DOC_AI_TIMEOUT }
+      );
+
+      const doc = (processedDoc as any)?.document || (Array.isArray(processedDoc) ? (processedDoc as any)[0]?.document : null);
+      if (doc) {
+        fullTextAll = String(doc.text || "");
+        tokensAll = getDocumentAiTokens(doc);
+        didDocAi = true;
+      }
+    } catch (e) {
+      docAiErrMsg = e instanceof Error ? e.message : String(e);
+      console.warn("[OCR] Document AI unavailable, falling back:", docAiErrMsg);
+    }
+
+    if (didDocAi) {
+      // no-op, we already populated fullTextAll + tokensAll
+    } else {
+    const allowFallbackOcr = String(process.env.ALLOW_FALLBACK_OCR || "").trim() === "1";
+    if (!allowFallbackOcr && !hasClientTokens) {
+      return new NextResponse(
+        JSON.stringify({
+          error: "OCR engine unavailable",
+          details: `Google Document AI failed and server fallback OCR is disabled.${docAiErrMsg ? ` Document AI error: ${docAiErrMsg}` : ""}`,
+          suggestion:
+            "Fix Google Document AI (billing/API/service account env vars) or set ALLOW_FALLBACK_OCR=1 to enable slower fallback OCR.",
+        }),
+        { status: 502, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     let sharpMod: any;
     try {
       sharpMod = (await import("sharp")).default;
@@ -297,9 +379,31 @@ export async function POST(request: Request) {
         const resWidth = imgMetadata.width || 800;
         const resHeight = imgMetadata.height || 800;
 
-        if (!hasClientTokens) {
-          // Server-side OCR (fallback engine)
-          const resizedImageMod = await sharpMod(page.processedPng)
+        const isTargetPageForClient = hasClientTokens && String(page.document_id) === String(extraction.document_id);
+
+        if (isTargetPageForClient) {
+          // Normalize and Remap client-provided tokens to Legal space
+          // We apply .rotate() because browser OCR (tesseract) usually runs on the auto-oriented visible image.
+          const baseImg = sharpMod(page.originalBytes).rotate();
+          const origMetadata = await baseImg.metadata();
+          const origW = origMetadata.width || resWidth;
+          const origH = origMetadata.height || resHeight;
+          const cropBox = page.preprocessDebug?.cropBox || { left: 0, top: 0, width: origW, height: origH };
+
+          const rawTokens = body.tokens as DocToken[];
+          const remapped = remapTokensToLegalSpace(rawTokens, origW, origH, cropBox);
+          
+          for (const t of remapped) {
+            tokensAll.push({
+              ...t,
+              pageIndex: i, // Assign to correct index in the batch
+            });
+          }
+          fullTextAll += (body.full_text || "") + "\n\n";
+          console.log(`[OCR] Used remapped client tokens for page ${i} (${page.document_id})`);
+        } else {
+          // Server-side OCR (fallback engine) for this page
+          const resizedImageMod = sharpMod(page.processedPng)
             .resize({ width: 800, withoutEnlargement: true });
           
           const resizedMetadata = await resizedImageMod.metadata();
@@ -307,13 +411,13 @@ export async function POST(request: Request) {
           const rHeight = resizedMetadata.height || 800;
           
           const resizedImageBuffer = await resizedImageMod.toBuffer();
-          const ocrResult = await performFallbackOcr(resizedImageBuffer, i);
+          const ocrResult = await withTimeout(performFallbackOcr(resizedImageBuffer, i), 20_000, `fallback_ocr_page_${i}`);
           
           fullTextAll += ocrResult.text + "\n\n";
           
           for (const t of ocrResult.tokens) {
             tokensAll.push({
-              pageIndex: t.pageIndex,
+              pageIndex: i,
               text: t.text,
               confidence: t.confidence,
               box: {
@@ -323,23 +427,6 @@ export async function POST(request: Request) {
                 maxY: t.box.maxY / rHeight,
                 midX: t.box.midX / rWidth,
                 midY: t.box.midY / rHeight,
-              }
-            });
-          }
-        } else if (i === 0 && clientTokensToNormalize.length > 0) {
-          // Normalize client-provided tokens (assume they belong to page 1)
-          for (const t of clientTokensToNormalize) {
-            tokensAll.push({
-              pageIndex: 0,
-              text: t.text,
-              confidence: t.confidence,
-              box: {
-                minX: t.box.minX / resWidth,
-                maxX: t.box.maxX / resWidth,
-                minY: t.box.minY / resHeight,
-                maxY: t.box.maxY / resHeight,
-                midX: t.box.midX / resWidth,
-                midY: t.box.midY / resHeight,
               }
             });
           }
@@ -359,11 +446,12 @@ export async function POST(request: Request) {
           JSON.stringify({
             error: "OCR failed",
             details: err.message,
-            suggestion: "Tesseract OCR failed to process the image.",
+            suggestion: "Fallback OCR failed. Fix Google Document AI for best results, or retry with fewer pages.",
           }),
           { status: 500, headers: { "Content-Type": "application/json" } }
         );
       }
+    }
     }
   }
 
@@ -664,14 +752,14 @@ export async function POST(request: Request) {
     const page1TemplateVersion = templateAcross.version;
     console.log("[DEBUG PDS] Starting PDS extraction, template version:", page1TemplateVersion);
     
-    const anchor = extractOwnerByAnchors(page1Doc, { templateVersion: page1TemplateVersion });
+    anchor = extractOwnerByAnchors(page1Doc, { templateVersion: page1TemplateVersion });
     console.log("[DEBUG PDS] Anchor extraction result:", {
       hasOwner: !!anchor.owner,
       owner: anchor.owner,
       debug: anchor.debug,
     });
     
-    const roi =
+    roi =
       page1TemplateVersion === "2018"
         ? extractOwnerFromTokensRoi2018(page1Doc)
         : page1TemplateVersion === "2025"
@@ -916,7 +1004,7 @@ export async function POST(request: Request) {
         }
       }
 
-      const coarseWindow: NormBox = { x: 0.55, y: 0.35, w: 0.43, h: 0.57 };
+      const coarseWindow: NormBox = { x: 0.50, y: 0.30, w: 0.48, h: 0.65 }; // Expanded window
       let visionCandidates: Array<{ roi: NormBox; score: number; reasons: string[] }> = [];
       try {
         visionCandidates = await findPhotoFrameCandidatesByVision({
@@ -1006,14 +1094,14 @@ export async function POST(request: Request) {
       photoDebug.candidates = bestAttempt.candidates;
       photoDebug.photoLabelBox = bestAttempt.photoLabelBox;
       photoDebug.thumbmarkLabelBox = bestAttempt.thumbLabelBox;
-      photoDebug.coarseWindow = { x: 0.55, y: 0.35, w: 0.43, h: 0.57 };
+      photoDebug.coarseWindow = { x: 0.50, y: 0.30, w: 0.48, h: 0.65 };
       photoDebug.faceDetected = Boolean((bestAttempt.cropped as any)?.debug?.faceLike);
       photoDebug.trim = (bestAttempt.cropped as any)?.debug?.trim ?? null;
       if (bestAttempt.roi) {
         photoDebug.chosen = { roi: bestAttempt.roi, method: photoDebug.method as any, faceDetected: photoDebug.faceDetected };
       }
 
-      const allowNoFace = bestAttempt.croppedMethod === "vision" && (bestAttempt.candidates?.[0]?.contrastScore ?? 0) >= 0.35;
+      const allowNoFace = bestAttempt.croppedMethod === "vision" && (bestAttempt.candidates?.[0]?.contrastScore ?? 0) >= 0.25; // Lowered threshold from 0.35
       const pass = Boolean((bestAttempt.cropped as any)?.debug?.faceLike) || allowNoFace;
       if (!pass) {
         photoDebug.warnings.push("no_face_and_no_strong_frame");
@@ -1042,6 +1130,34 @@ export async function POST(request: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     photoDebug.warnings.push(`photo_extract_failed:${msg}`);
+  }
+
+  (photoDebug as any).pageCount = pageCount;
+
+  if (docTypeFinal === "pds") {
+    const hasOwner = Boolean(ownerCandidate && (ownerCandidate as any).last_name && (ownerCandidate as any).first_name);
+    const hasPhoto = Boolean((photoDebug as any)?.storedPath);
+    if (!hasOwner && !hasPhoto) {
+      await supabase
+        .from("extractions")
+        .update({
+          status: "error",
+          errors: {
+            ocr: "OCR finished but no Personal Information and no ID photo could be extracted. Check scan quality and/or use Google Document AI billing-enabled project.",
+          },
+          updated_by: user.id,
+        } as any)
+        .eq("id", chosenExtractionId);
+
+      return new NextResponse(
+        JSON.stringify({
+          error: "OCR produced no extractable fields",
+          details: "No owner_candidate and no extracted photo",
+          suggestion: "Ensure the document is a clear PDS scan/photo. If using Document AI, confirm billing is enabled and the OCR processor is correct. Then retry.",
+        }),
+        { status: 422, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }
 
   await supabase

@@ -5,6 +5,7 @@ export type PreprocessDebug = {
   contrast: { used: boolean; method: "linear" | "none" };
   grayscale: boolean;
   warnings: string[];
+  cropBox?: { left: number; top: number; width: number; height: number };
 };
 
 export async function preprocessPdsPage(input: {
@@ -36,6 +37,7 @@ export async function preprocessPdsPage(input: {
         contrast: { used: false, method: "none" },
         grayscale: false,
         warnings,
+        cropBox: norm.debug.cropBox,
       },
     };
   }
@@ -56,6 +58,7 @@ export async function preprocessPdsPage(input: {
       contrast: { used: true, method: "linear" },
       grayscale: true,
       warnings,
+      cropBox: norm.debug.cropBox,
     },
   };
 }

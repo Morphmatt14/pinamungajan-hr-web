@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createWorker, type Worker } from "tesseract.js";
-import type { DocToken } from "@/lib/pds/documentAiTokens";
 
 export function RunOcrButton({ extractionId }: { extractionId: string }) {
   const router = useRouter();
@@ -53,67 +51,20 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
   }
 
   async function run() {
-    let worker: Worker | null = null;
     try {
       setState({ status: "running" });
 
-      // 1. Get the image URL for this extraction
-      // For simplicity, we assume the original upload is accessible. 
-      // We'll fetch the extraction metadata first to get the URL.
-      const metaRes = await fetch(`/api/extractions/${extractionId}`);
-      if (!metaRes.ok) throw new Error("Failed to fetch extraction metadata");
-      const meta = await metaRes.json();
-      
-      if (!meta?.file_url) throw new Error("No image file found for this document");
+      const controller = new AbortController();
+      const timeoutMs = 240_000;
+      const t = window.setTimeout(() => controller.abort(), timeoutMs);
 
-      // 2. Perform OCR in the browser
-      worker = await createWorker("eng", 1, {
-        logger: (m) => {
-          if (m.status === "recognizing text") {
-            // progress could be tracked here
-          }
-        },
-        langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
-      });
-
-      const ocrResult = await worker.recognize(meta.file_url);
-      
-      // 2.1 Get image dimensions for normalization
-      const img = new Image();
-      img.src = meta.file_url;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve; // Continue even if image fails to load for naturalWidth
-      });
-      const width = img.naturalWidth || 1000;
-      const height = img.naturalHeight || 1000;
-
-      const words = (ocrResult.data as any).words || [];
-      const tokens: DocToken[] = words.map((word: any) => ({
-        pageIndex: 0,
-        text: word.text,
-        confidence: word.confidence / 100,
-        box: {
-          minX: word.bbox.x0 / width,
-          maxX: word.bbox.x1 / width,
-          minY: word.bbox.y0 / height,
-          maxY: word.bbox.y1 / height,
-          midX: ((word.bbox.x0 + word.bbox.x1) / 2) / width,
-          midY: ((word.bbox.y0 + word.bbox.y1) / 2) / height,
-        },
-      }));
-
-      // 3. Send the pre-generated tokens to the backend
-      const res = await fetch(`${window.location.origin}/api/ocr`, {
+      const res = await fetch(`/api/ocr`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ 
-          extraction_id: extractionId,
-          tokens: tokens,
-          full_text: ocrResult.data.text
-        }),
-      });
+        body: JSON.stringify({ extraction_id: extractionId }),
+        signal: controller.signal,
+      }).finally(() => window.clearTimeout(t));
 
       if (!res.ok) {
         const message = await readErrorMessage(res);
@@ -125,14 +76,17 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
       router.refresh();
     } catch (e) {
       console.error("Client OCR Error:", e);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setState({
+          status: "error",
+          message: "OCR timed out. Please retry. If this keeps happening, check Google Document AI billing/credentials or reduce pages.",
+        });
+        return;
+      }
       setState({
         status: "error",
         message: e instanceof Error ? e.message : "Failed to run OCR",
       });
-    } finally {
-      if (worker) {
-        await worker.terminate();
-      }
     }
   }
 
