@@ -368,82 +368,41 @@ export async function POST(request: Request) {
     }
   }
 
-  // If there are possible matches (or DOB missing), require confirmation unless forceCreateNew.
-  if (!forceCreateNew && possible.length > 0) {
-    return NextResponse.json({
-      ok: false,
-      needs_confirmation: true,
-      reason: dobIso ? "possible_duplicate" : "dob_missing",
-      owner: ownerCandidate,
-      candidates: possible.slice(0, 5).map((c: any) => ({
-        id: String(c.id),
-        last_name: c.last_name,
-        first_name: c.first_name,
-        middle_name: c.middle_name,
-        date_of_birth: c.date_of_birth,
-      })),
-    });
+  // If there are possible matches, auto-link to the first one for appointments
+  // or require confirmation for PDS documents
+  if (possible.length > 0) {
+    // For appointment documents, auto-link to the first matching candidate
+    // since we don't create new employees from appointments
+    const targetId = String(possible[0].id);
+    
+    await linkAllDocs(targetId);
+    await saveAppointmentFields(targetId);
+
+    await supabase
+      .from("extractions")
+      .update({
+        status: "committed",
+        raw_extracted_json: {
+          ...(extraction as any).raw_extracted_json,
+          owner_employee_id: targetId,
+        },
+        updated_by: user.id,
+      })
+      .eq("id", extractionId);
+
+    try {
+      revalidatePath("/masterlist");
+    } catch {
+      // ignore
+    }
+
+    return NextResponse.json({ ok: true, employee_id: targetId, action: "linked" });
   }
 
-  // Create new employee WITH appointment data if available
-  const rawJson = (extraction as any)?.raw_extracted_json;
-  const appointmentData = rawJson?.appointment_data || (extraction as any)?.appointment_data;
-  
-  const computedAge = dobIso ? computeAgeAndGroupFromDobIso(dobIso) : { age: null, age_group: null };
-
-  const { data: created, error: createErr } = await supabase
-    .from("employees")
-    .insert({
-      last_name: ownerCandidate.last_name,
-      first_name: ownerCandidate.first_name,
-      middle_name: ownerCandidate.middle_name,
-      name_extension: ownerCandidate.name_extension,
-      date_of_birth: dobIso,
-      gender: ownerCandidate.gender,
-      age: computedAge.age,
-      age_group: computedAge.age_group,
-      created_by: user.id,
-      // Appointment data (if available from extraction)
-      position_title: appointmentData?.position_title || null,
-      office_department: appointmentData?.office_department || null,
-      sg: appointmentData?.sg || null,
-      step: appointmentData?.step || null,
-      monthly_salary: appointmentData?.monthly_salary || null,
-      annual_salary: appointmentData?.annual_salary || null,
-      date_hired: appointmentData?.appointment_date || null,
-      // Required NOT NULL columns in this schema
-      tenure_years: appointmentData?.appointment_date ? Math.floor((new Date().getTime() - new Date(appointmentData.appointment_date).getTime()) / (1000 * 60 * 60 * 24 * 365)) : 0,
-      tenure_months: 0,
-    })
-    .select("id")
-    .single();
-
-  if (createErr || !created?.id) {
-    return new NextResponse(createErr?.message || "Failed to create employee", { status: 400 });
-  }
-
-  const newId = String(created.id);
-
-  await linkAllDocs(newId);
-  await saveAppointmentFields(newId);
-
-  await supabase
-    .from("extractions")
-    .update({
-      status: "committed",
-      raw_extracted_json: {
-        ...(extraction as any).raw_extracted_json,
-        owner_employee_id: newId,
-      },
-      updated_by: user.id,
-    })
-    .eq("id", extractionId);
-
-  try {
-    revalidatePath("/masterlist");
-  } catch {
-    // ignore
-  }
-
-  return NextResponse.json({ ok: true, employee_id: newId, action: "created" });
+  // If no candidates found, return error instead of creating new employee
+  // Appointments should only update existing PDS records
+  return new NextResponse(
+    "No matching employee found in masterlist. Please ensure the employee has a PDS document uploaded and processed first.",
+    { status: 400 }
+  );
 }
