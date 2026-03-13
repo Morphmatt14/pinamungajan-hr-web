@@ -346,6 +346,9 @@ export async function POST(request: Request) {
       }
     } catch (e) {
       docAiErrMsg = e instanceof Error ? e.message : String(e);
+      console.error("[OCR] Document AI FAILED with error:", docAiErrMsg);
+      console.error("[OCR] Document AI error full:", e);
+      console.error("[OCR] Document AI error stack:", e instanceof Error ? e.stack : "no stack");
       console.warn("[OCR] Document AI unavailable, falling back:", docAiErrMsg);
     }
 
