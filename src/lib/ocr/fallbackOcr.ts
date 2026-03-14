@@ -14,15 +14,10 @@ export async function performFallbackOcr(
 }> {
   let worker: Tesseract.Worker | null = null;
   try {
-    // Use custom worker path for Vercel serverless environment
-    const workerPath = process.env.VERCEL ? 
-      require.resolve('tesseract.js/dist/worker.min.js') : 
-      undefined;
-    
+    // Simplified configuration for Vercel compatibility
     worker = await createWorker("eng", 1, {
-      logger: (m) => {},
+      logger: () => {}, // Suppress all logs
       langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
-      ...(workerPath ? { workerPath } : {}),
     });
 
     const result = await worker.recognize(imageBuffer);
