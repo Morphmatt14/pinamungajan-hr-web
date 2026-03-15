@@ -5,7 +5,7 @@ import { detectPdsTemplateVersionFromText } from "@/lib/pds/templateDetect";
 import { extractOwnerByAnchors } from "@/lib/pds/anchorOwnerExtract";
 import { extractOwnerFromTokensRoi2018 } from "@/lib/pds2018/tokenRoiExtract";
 import { computeAgeAndGroupFromDobIso } from "@/lib/age";
-import { performFallbackOcr } from "@/lib/ocr/fallbackOcr";
+import { performCloudVisionOcr } from "@/lib/ocr/cloudVision";
 import { extractSexAtBirth } from "@/lib/pds/sexAtBirthExtract";
 import { getDocumentAiTokens, remapTokensToLegalSpace, type DocToken } from "@/lib/pds/documentAiTokens";
 import { createDocumentAiClient, getProcessorName } from "@/lib/gcp/documentAi";
@@ -322,34 +322,47 @@ export async function POST(request: Request) {
   if (!hasClientTokens || clientTokensToNormalize.length > 0) {
     let didDocAi = false;
     let docAiErrMsg = "";
-    try {
-      const client = createDocumentAiClient();
-      const name = getProcessorName();
-      const pdfBytes = await buildMultipagePdfFromPngs(sortedPages.map((p) => p.processedPng));
-      const DOC_AI_TIMEOUT = 180000;
-      const processedDoc = await (client as any).processDocument(
-        {
-          name,
-          rawDocument: {
-            content: pdfBytes,
-            mimeType: "application/pdf",
+    let retryCount = 0;
+    const maxRetries = 2;
+    
+    while (!didDocAi && retryCount <= maxRetries) {
+      try {
+        const client = createDocumentAiClient();
+        const name = getProcessorName();
+        const pdfBytes = await buildMultipagePdfFromPngs(sortedPages.map((p) => p.processedPng));
+        const DOC_AI_TIMEOUT = 300000; // 5 minutes
+        
+        console.log(`[OCR] Document AI attempt ${retryCount + 1}/${maxRetries + 1}`);
+        
+        const processedDoc = await (client as any).processDocument(
+          {
+            name,
+            rawDocument: {
+              content: pdfBytes,
+              mimeType: "application/pdf",
+            },
           },
-        },
-        { timeout: DOC_AI_TIMEOUT }
-      );
+          { timeout: DOC_AI_TIMEOUT }
+        );
 
-      const doc = (processedDoc as any)?.document || (Array.isArray(processedDoc) ? (processedDoc as any)[0]?.document : null);
-      if (doc) {
-        fullTextAll = String(doc.text || "");
-        tokensAll = getDocumentAiTokens(doc);
-        didDocAi = true;
+        const doc = (processedDoc as any)?.document || (Array.isArray(processedDoc) ? (processedDoc as any)[0]?.document : null);
+        if (doc) {
+          fullTextAll = String(doc.text || "");
+          tokensAll = getDocumentAiTokens(doc);
+          didDocAi = true;
+          console.log("[OCR] Document AI SUCCESS!");
+        }
+      } catch (e) {
+        docAiErrMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[OCR] Document AI FAILED (attempt ${retryCount + 1}):`, docAiErrMsg);
+        
+        if (retryCount < maxRetries) {
+          const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s
+          console.log(`[OCR] Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        retryCount++;
       }
-    } catch (e) {
-      docAiErrMsg = e instanceof Error ? e.message : String(e);
-      console.error("[OCR] Document AI FAILED with error:", docAiErrMsg);
-      console.error("[OCR] Document AI error full:", e);
-      console.error("[OCR] Document AI error stack:", e instanceof Error ? e.stack : "no stack");
-      console.warn("[OCR] Document AI unavailable, falling back:", docAiErrMsg);
     }
 
     if (didDocAi) {
@@ -414,7 +427,8 @@ export async function POST(request: Request) {
           const rHeight = resizedMetadata.height || 800;
           
           const resizedImageBuffer = await resizedImageMod.toBuffer();
-          const ocrResult = await withTimeout(performFallbackOcr(resizedImageBuffer, i), 60_000, `fallback_ocr_page_${i}`);
+          // Use Google Cloud Vision API instead of Tesseract (which doesn't work on Vercel)
+          const ocrResult = await withTimeout(performCloudVisionOcr(resizedImageBuffer, i), 30_000, `vision_ocr_page_${i}`);
           
           fullTextAll += ocrResult.text + "\n\n";
           

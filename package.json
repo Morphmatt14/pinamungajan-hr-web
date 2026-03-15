@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google-cloud/documentai": "^9.5.0",
+    "@google-cloud/vision": "^5.3.4",
     "@napi-rs/canvas": "^0.1.93",
     "@supabase/ssr": "^0.8.0",
     "docx": "^9.5.1",
