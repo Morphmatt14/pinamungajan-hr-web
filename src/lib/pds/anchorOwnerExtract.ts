@@ -313,10 +313,11 @@ function tokensInRowAndRoi(tokens: DocToken[], roi: NormalizedRect, rowBox: Toke
   return tokens.filter((t) => {
     const inRoi = t.box.midX >= roi.x && t.box.midX <= x2 && t.box.midY >= roi.y && t.box.midY <= y2;
     if (!inRoi) return false;
-    // Exclude tokens that overlap too much with the label box (prevents "MIDDLE", "NAME" from being included)
+    // Exclude label-column tokens (prevents "MIDDLE", "NAME" from being included).
+    // IMPORTANT: Do NOT exclude by Y-overlap alone, because value tokens share the same row Y-range.
     if (labelBox) {
-      const labelOverlap = yOverlapRatio(t.box, labelBox);
-      if (labelOverlap > 0.3) return false; // Token is mostly in label area, skip it
+      const padX = 0.01;
+      if (t.box.midX <= labelBox.maxX + padX) return false;
     }
     return yOverlapRatio(t.box, rowBox) >= 0.5;
   });
