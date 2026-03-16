@@ -1,6 +1,5 @@
 import vision from "@google-cloud/vision";
 import type { DocToken } from "../pds/documentAiTokens";
-import sharp from "sharp";
 
 /**
  * OCR using Google Cloud Vision API as fallback when Document AI fails
@@ -13,11 +12,6 @@ export async function performCloudVisionOcr(
   tokens: DocToken[];
   confidence: number;
 }> {
-  // Get image dimensions for coordinate normalization
-  const metadata = await sharp(imageBuffer).metadata();
-  const imgWidth = metadata.width || 1;
-  const imgHeight = metadata.height || 1;
-
   const client = new vision.ImageAnnotatorClient({
     credentials: JSON.parse(process.env.GCP_SERVICE_ACCOUNT_JSON || "{}"),
   });
@@ -30,7 +24,8 @@ export async function performCloudVisionOcr(
   const pages = result.fullTextAnnotation?.pages || [];
   const tokens: DocToken[] = [];
 
-  // Convert Vision API blocks to tokens with normalized coordinates
+  // Convert Vision API blocks to tokens.
+  // IMPORTANT: Vision returns pixel coordinates; the caller normalizes these.
   for (const page of pages) {
     for (const block of page.blocks || []) {
       for (const paragraph of block.paragraphs || []) {
@@ -41,14 +36,13 @@ export async function performCloudVisionOcr(
           const vertices = word.boundingBox?.vertices || [];
           if (vertices.length < 4) continue;
 
-          // Cloud Vision returns pixel coordinates - normalize to 0-1
-          const minX = Math.min(...vertices.map((v: any) => v.x || 0)) / imgWidth;
-          const maxX = Math.max(...vertices.map((v: any) => v.x || 0)) / imgWidth;
-          const minY = Math.min(...vertices.map((v: any) => v.y || 0)) / imgHeight;
-          const maxY = Math.max(...vertices.map((v: any) => v.y || 0)) / imgHeight;
+          const minX = Math.min(...vertices.map((v: any) => v.x || 0));
+          const maxX = Math.max(...vertices.map((v: any) => v.x || 0));
+          const minY = Math.min(...vertices.map((v: any) => v.y || 0));
+          const maxY = Math.max(...vertices.map((v: any) => v.y || 0));
 
           // Get confidence from word property
-          const confidence = (word.confidence || 0.9) / 100; // Vision uses 0-1
+          const confidence = typeof word.confidence === "number" ? word.confidence : 0.9;
 
           tokens.push({
             pageIndex,
