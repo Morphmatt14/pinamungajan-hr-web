@@ -55,7 +55,8 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
       setState({ status: "running" });
 
       const controller = new AbortController();
-      const timeoutMs = 240_000;
+      // Server-side OCR may take several minutes (Document AI + retries + fallback OCR)
+      const timeoutMs = 420_000;
       const t = window.setTimeout(() => controller.abort(), timeoutMs);
 
       const res = await fetch(`/api/ocr`, {
@@ -79,7 +80,8 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
       if (e instanceof DOMException && e.name === "AbortError") {
         setState({
           status: "error",
-          message: "OCR timed out. Please retry. If this keeps happening, check Google Document AI billing/credentials or reduce pages.",
+          message:
+            "OCR is taking too long and the browser request timed out. Please retry. If this keeps happening, reduce pages or fix Google Document AI / Cloud Vision credentials.",
         });
         return;
       }
