@@ -1,6 +1,47 @@
 import vision from "@google-cloud/vision";
 import type { DocToken } from "../pds/documentAiTokens";
 
+function readEnv(...keys: string[]) {
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v && String(v).trim()) return String(v).trim();
+  }
+  return "";
+}
+
+function parseServiceAccountJson(raw: string) {
+  const v = String(raw || "").trim();
+  if (!v) return null;
+
+  try {
+    const parsed = JSON.parse(v);
+    if (parsed.private_key && typeof parsed.private_key === "string") {
+      parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+    }
+    return parsed;
+  } catch {
+    try {
+      const unquoted = v.replace(/^"/, "").replace(/"$/, "");
+      const parsed = JSON.parse(unquoted);
+      if (parsed.private_key && typeof parsed.private_key === "string") {
+        parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+      }
+      return parsed;
+    } catch {
+      try {
+        const unescaped = v.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+        const parsed = JSON.parse(unescaped);
+        if (parsed.private_key && typeof parsed.private_key === "string") {
+          parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+        }
+        return parsed;
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+
 /**
  * OCR using Google Cloud Vision API as fallback when Document AI fails
  */
@@ -12,9 +53,22 @@ export async function performCloudVisionOcr(
   tokens: DocToken[];
   confidence: number;
 }> {
-  const client = new vision.ImageAnnotatorClient({
-    credentials: JSON.parse(process.env.GCP_SERVICE_ACCOUNT_JSON || "{}"),
-  });
+  const credentialsJsonRaw = readEnv("GCP_SERVICE_ACCOUNT_JSON", "GOOGLE_CLOUD_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS_JSON");
+  const credentials = credentialsJsonRaw ? parseServiceAccountJson(credentialsJsonRaw) : null;
+
+  if (credentials) {
+    const hasEmail = typeof (credentials as any).client_email === "string" && String((credentials as any).client_email).trim();
+    const hasKey = typeof (credentials as any).private_key === "string" && String((credentials as any).private_key).trim();
+    if (!hasEmail || !hasKey) {
+      throw new Error(
+        "Invalid GCP_SERVICE_ACCOUNT_JSON: missing client_email/private_key (check quoting/escaping in env var)"
+      );
+    }
+  }
+
+  const client = credentials
+    ? new vision.ImageAnnotatorClient({ credentials })
+    : new vision.ImageAnnotatorClient();
 
   const [result] = await client.textDetection({
     image: { content: imageBuffer },
