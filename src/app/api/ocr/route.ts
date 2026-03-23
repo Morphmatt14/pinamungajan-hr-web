@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { extractOwnerFromTokensRoi } from "@/lib/pds2025/tokenRoiExtract";
 import { detectPdsTemplateVersionFromText } from "@/lib/pds/templateDetect";
 import { extractOwnerByAnchors } from "@/lib/pds/anchorOwnerExtract";
@@ -121,15 +122,25 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
+    const workerSecret = String(process.env.OCR_WORKER_SECRET || "").trim();
+    const reqSecret = String(request.headers.get("x-ocr-worker-secret") || "").trim();
+    const isWorker = Boolean(workerSecret) && reqSecret === workerSecret;
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const supabase: any = isWorker ? createSupabaseAdminClient() : await createSupabaseServerClient();
 
-    const user = session?.user;
-    if (!user) {
-      return new NextResponse("Unauthorized", { status: 401 });
+    let updatedById: string | null = null;
+
+    if (!isWorker) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const user = session?.user;
+      if (!user) {
+        return new NextResponse("Unauthorized", { status: 401 });
+      }
+
+      updatedById = String(user.id);
     }
 
   // buildMultipagePdfFromImages was removed because Tesseract processes pages individually.
@@ -455,7 +466,7 @@ export async function POST(request: Request) {
           .update({
             status: "error",
             errors: { ocr: `OCR failed: ${err.message}. Please try again.` },
-            updated_by: user.id,
+            updated_by: updatedById,
           } as any)
           .eq("id", extractionId);
         
@@ -1162,7 +1173,7 @@ export async function POST(request: Request) {
           errors: {
             ocr: "OCR finished but no Personal Information and no ID photo could be extracted. Check scan quality and/or use Google Document AI billing-enabled project.",
           },
-          updated_by: user.id,
+          updated_by: updatedById,
         } as any)
         .eq("id", chosenExtractionId);
 
@@ -1328,7 +1339,7 @@ export async function POST(request: Request) {
       doc_type_final: docTypeFinal,
       doc_type_detected: docTypeDetected,
       doc_type_mismatch_warning: docTypeMismatchWarning,
-      updated_by: user.id,
+      updated_by: updatedById,
     } as any)
     .eq("id", chosenExtractionId);
 
