@@ -9,6 +9,7 @@ import { SexConfirm } from "@/app/review/[id]/SexConfirm";
 import { ExtractedPhotoPanel } from "@/app/review/[id]/ExtractedPhotoPanel";
 import { DebugExtractionPanel } from "@/app/review/[id]/DebugExtractionPanel";
 import { DocTypePanel } from "@/app/review/[id]/DocTypePanel";
+import { isAdminUser } from "@/lib/auth/roles";
 
 export default async function ReviewDetailPage({
   params,
@@ -21,6 +22,16 @@ export default async function ReviewDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (!user || !isAdminUser(user)) {
+    return (
+      <AppShell title="Review Extraction">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Only admin users can access review details.
+        </div>
+      </AppShell>
+    );
+  }
 
   const { data: extraction, error } = await supabase
     .from("extractions")

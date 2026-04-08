@@ -764,6 +764,7 @@ export async function POST(request: Request) {
           }
           
           if (Object.keys(patch).length > 0) {
+            if (updatedById) patch.updated_by = updatedById;
             await supabase.from("employees").update(patch).eq("id", ownerEmployeeId);
           }
         } else if (filtered.length > 1) {
@@ -892,6 +893,7 @@ export async function POST(request: Request) {
           }
           
           if (Object.keys(patch).length > 0) {
+            if (updatedById) patch.updated_by = updatedById;
             await supabase.from("employees").update(patch).eq("id", ownerEmployeeId);
           }
         } else if (filtered.length > 1) {

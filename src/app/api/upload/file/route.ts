@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
 import { enqueueOcrJob } from "@/lib/qstash/publish";
+import { isAdminUser } from "@/lib/auth/roles";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
 
   if (userError || !user) {
     return new NextResponse(`Unauthorized${userError?.message ? `: ${userError.message}` : ""}`, { status: 401 });
+  }
+  if (isAdminUser(user)) {
+    return new NextResponse("Forbidden: admin accounts cannot upload documents", { status: 403 });
   }
 
   let form: FormData;

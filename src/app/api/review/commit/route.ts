@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { computeAgeAndGroupFromDobIso } from "@/lib/age";
 import { revalidatePath } from "next/cache";
+import { isAdminUser } from "@/lib/auth/roles";
 
 function normalizeNameForMatch(s: string) {
   return String(s || "")
@@ -45,6 +46,9 @@ export async function POST(request: Request) {
 
   if (userError || !user) {
     return new NextResponse("Unauthorized", { status: 401 });
+  }
+  if (!isAdminUser(user)) {
+    return new NextResponse("Forbidden", { status: 403 });
   }
 
   let body: any;
@@ -197,6 +201,7 @@ export async function POST(request: Request) {
     console.log("[DEBUG] Patch to apply:", JSON.stringify(patch, null, 2));
 
     if (Object.keys(patch).length > 0) {
+      patch.updated_by = user.id;
       // Appointment data updates the employee record directly
       const { error: updateError, data: updateData } = await supabase.from("employees").update(patch).eq("id", employeeId).select();
       if (updateError) {
@@ -276,6 +281,7 @@ export async function POST(request: Request) {
         safePatch.age_group = patch.age_group;
       }
       if (Object.keys(safePatch).length > 0) {
+        safePatch.updated_by = user.id;
         await supabase.from("employees").update(safePatch).eq("id", primaryEmployeeId);
       }
     }

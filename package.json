@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "setup:gcp": "node scripts/setup-gcp.mjs",
+    "setup:gcp:auto": "node scripts/setup-gcp.mjs --yes",
+    "setup:admin": "node scripts/setup-admin-user.mjs",
     "dev": "cmd /c \"set NEXT_DISABLE_TURBOPACK=1&& next dev\"",
     "build": "next build",
     "start": "next start",

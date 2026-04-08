@@ -7,7 +7,7 @@ export async function ReviewList() {
 
   const { data, error } = await supabase
     .from("extractions")
-    .select("id, document_id, status, quality_score, warnings, errors, created_at, updated_at, batch_id, document_set_id")
+    .select("id, document_id, status, quality_score, warnings, errors, created_at, updated_at, batch_id, document_set_id, created_by")
     .order("updated_at", { ascending: false })
     .limit(50);
 
@@ -15,7 +15,7 @@ export async function ReviewList() {
     return <div className="text-sm text-red-700">Error: {error.message}</div>;
   }
 
-  const rows = (data || []) as (ExtractionRow & { batch_id?: string | null; document_set_id?: string | null })[];
+  const rows = (data || []) as (ExtractionRow & { batch_id?: string | null; document_set_id?: string | null; created_by?: string | null })[];
 
   // Group by document_set_id (preferred), otherwise by batch_id.
   const byGroupKey = new Map<
@@ -117,6 +117,9 @@ export async function ReviewList() {
                       </div>
                       <div className="text-xs text-zinc-800 font-mono">{id}</div>
                       <div className="mt-1 text-xs text-zinc-700">Latest: {new Date(group[group.length - 1].updated_at).toLocaleString()}</div>
+                      <div className="mt-1 text-[11px] text-zinc-700 font-mono">
+                        Uploaded by: {group[0]?.created_by ? String(group[0].created_by).slice(0, 8) + "..." : "unknown"}
+                      </div>
                     </div>
                     <Link className="text-sm underline" href={`/review/${group[0].id}`}>
                       Open first
@@ -147,6 +150,9 @@ export async function ReviewList() {
                   <div className="text-sm font-medium">{r.status}</div>
                   <div className="text-xs text-zinc-800 font-mono">{r.id}</div>
                   <div className="mt-1 text-xs text-zinc-700">Uploaded: {new Date(r.created_at).toLocaleString()}</div>
+                  <div className="mt-1 text-[11px] text-zinc-700 font-mono">
+                    Uploaded by: {r.created_by ? String(r.created_by).slice(0, 8) + "..." : "unknown"}
+                  </div>
                 </div>
                 <Link className="text-sm underline" href={`/review/${r.id}`}>
                   Open

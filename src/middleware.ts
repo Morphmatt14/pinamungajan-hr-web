@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const PUBLIC_PATHS = new Set<string>(["/login", "/logout"]);
+const PUBLIC_PATHS = new Set<string>(["/login", "/logout", "/pending-approval"]);
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Static files from /public (logos, guides, etc.) must load without a session (e.g. login page images).
+  if (/\.(png|jpg|jpeg|gif|svg|ico|webp|pdf|woff2?)$/i.test(pathname)) {
+    return NextResponse.next();
+  }
 
   if (
     pathname.startsWith("/_next") ||
@@ -28,7 +33,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  let response = NextResponse.next({
+  const response = NextResponse.next({
     request: {
       headers: request.headers,
     },
@@ -47,7 +52,7 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  let session: any = null;
+  let session = null;
   try {
     const {
       data: { session: s },
@@ -65,6 +70,23 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = new URL("/login", request.url);
     redirectUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(redirectUrl);
+  }
+
+  const role = String(session?.user?.app_metadata?.role || "").toLowerCase();
+  const approvedFlag = session?.user?.app_metadata?.approved === true;
+  const isApproved = role === "admin" || role === "hr" || approvedFlag;
+  const isAdmin = role === "admin";
+  if (!isApproved && !pathname.startsWith("/pending-approval")) {
+    return NextResponse.redirect(new URL("/pending-approval", request.url));
+  }
+  if (isApproved && pathname.startsWith("/pending-approval")) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+  if (pathname.startsWith("/review") && !isAdmin) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+  if (pathname.startsWith("/upload") && isAdmin) {
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   return response;
