@@ -15,6 +15,13 @@ export type DocToken = {
 };
 
 export function getDocumentAiTokens(document: any): DocToken[] {
+  // If the document actually already contains the simplified token list (DocToken[]),
+  // return it directly. This allows us to use the same extractors for both 
+  // Google Document AI and our internal simplified token format.
+  if (Array.isArray(document?.tokens)) {
+    return document.tokens;
+  }
+
   const pages = (document?.pages || []) as any[];
   const fullText = String(document?.text || "");
   const out: DocToken[] = [];
@@ -56,4 +63,45 @@ export function getDocumentAiTokens(document: any): DocToken[] {
   }
 
   return out;
+}
+
+export function remapTokensToLegalSpace(
+  tokens: DocToken[],
+  originalWidth: number,
+  originalHeight: number,
+  cropBox: { left: number; top: number; width: number; height: number },
+  dpi: number = 300
+): DocToken[] {
+  const targetW = Math.round(8.5 * dpi);
+  const targetH = Math.round(13 * dpi);
+
+  // The client tokens are relative to originalWidth x originalHeight.
+  // We compute the true pixel box, subtract the cropBox, then scale to targetW/targetH.
+  const s = Math.min(targetW / cropBox.width, targetH / cropBox.height);
+  const dx = (targetW - cropBox.width * s) / 2;
+  const dy = (targetH - cropBox.height * s) / 2;
+
+  return tokens.map((t) => {
+    const pxMinX = t.box.minX * originalWidth;
+    const pxMaxX = t.box.maxX * originalWidth;
+    const pxMinY = t.box.minY * originalHeight;
+    const pxMaxY = t.box.maxY * originalHeight;
+
+    const cropMinX = pxMinX - cropBox.left;
+    const cropMaxX = pxMaxX - cropBox.left;
+    const cropMinY = pxMinY - cropBox.top;
+    const cropMaxY = pxMaxY - cropBox.top;
+
+    return {
+      ...t,
+      box: {
+        minX: (cropMinX * s + dx) / targetW,
+        maxX: (cropMaxX * s + dx) / targetW,
+        minY: (cropMinY * s + dy) / targetH,
+        maxY: (cropMaxY * s + dy) / targetH,
+        midX: (((cropMinX + cropMaxX) / 2) * s + dx) / targetW,
+        midY: (((cropMinY + cropMaxY) / 2) * s + dy) / targetH,
+      }
+    };
+  });
 }

@@ -6,6 +6,7 @@ export type NormalizeDebug = {
   outputPx: { w: number; h: number };
   dpiUsed: number;
   warnings: string[];
+  cropBox?: { left: number; top: number; width: number; height: number };
 };
 
 type NormalizeInput = {
@@ -60,6 +61,7 @@ export async function normalizeScanToLegal(input: NormalizeInput): Promise<{ buf
         outputPx: { w: targetW, h: targetH },
         dpiUsed: input.dpi,
         warnings: ["missing_dimensions"],
+        cropBox: { left: 0, top: 0, width: srcW, height: srcH },
       },
     };
   }
@@ -142,6 +144,7 @@ export async function normalizeScanToLegal(input: NormalizeInput): Promise<{ buf
           outputPx: { w: meta2.width || srcW, h: meta2.height || srcH },
           dpiUsed: input.dpi,
           warnings: [...warnings, "skip_paper_crop"],
+          cropBox: { left: 0, top: 0, width: srcW, height: srcH },
         },
       };
     }
@@ -159,6 +162,7 @@ export async function normalizeScanToLegal(input: NormalizeInput): Promise<{ buf
         outputPx: { w: targetW, h: targetH },
         dpiUsed: input.dpi,
         warnings,
+        cropBox: { left: 0, top: 0, width: srcW, height: srcH },
       },
     };
   }
@@ -196,6 +200,7 @@ export async function normalizeScanToLegal(input: NormalizeInput): Promise<{ buf
       outputPx: { w: targetW, h: targetH },
       dpiUsed: input.dpi,
       warnings,
+      cropBox: { left, top, width: cropW, height: cropH },
     },
   };
 }

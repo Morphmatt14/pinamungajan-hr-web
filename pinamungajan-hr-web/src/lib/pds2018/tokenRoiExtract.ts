@@ -16,6 +16,12 @@ export type RoiExtractDebug = {
   rejected: Record<string, string[]>;
 };
 
+const LABEL_WORDS = new Set([
+  "SURNAME", "FIRST", "MIDDLE", "NAME", "DATE", "OF", "BIRTH", "DOB",
+  "MIDDLLE", "MIDLE", "MIDDL", "SURNAM", "SURNANE", "F1RST", "F1RSTNAME",
+  "B1RTH", "DAT", "BIRTHDATE"
+]);
+
 function clean(s: string) {
   return String(s || "")
     .replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, "-")
@@ -24,12 +30,19 @@ function clean(s: string) {
     .trim();
 }
 
+function cleanAndRemoveLabels(s: string): string {
+  const cleaned = clean(s);
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const filtered = words.filter(w => !LABEL_WORDS.has(w.toUpperCase()));
+  return filtered.join(" ").trim();
+}
+
 function insideRoi(box: TokenBox, roi: Roi) {
   return box.midX >= roi.x && box.midX <= roi.x + roi.w && box.midY >= roi.y && box.midY <= roi.y + roi.h;
 }
 
 function join(tokens: Array<{ text: string; box: TokenBox }>) {
-  return tokens
+  const joined = tokens
     .slice()
     .sort((a, b) => a.box.minX - b.box.minX)
     .map((t) => clean(t.text))
@@ -37,6 +50,7 @@ function join(tokens: Array<{ text: string; box: TokenBox }>) {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+  return cleanAndRemoveLabels(joined);
 }
 
 export function extractOwnerFromTokensRoi2018(document: any): { owner: OwnerCandidate | null; debug: RoiExtractDebug } {

@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createDocumentAiClient, getProcessorName } from "@/lib/gcp/documentAi";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { extractOwnerFromTokensRoi } from "@/lib/pds2025/tokenRoiExtract";
 import { detectPdsTemplateVersionFromText } from "@/lib/pds/templateDetect";
 import { extractOwnerByAnchors } from "@/lib/pds/anchorOwnerExtract";
 import { extractOwnerFromTokensRoi2018 } from "@/lib/pds2018/tokenRoiExtract";
 import { computeAgeAndGroupFromDobIso } from "@/lib/age";
-import { getDocumentAiTokens } from "@/lib/pds/documentAiTokens";
+import { performCloudVisionOcr } from "@/lib/ocr/cloudVision";
 import { extractSexAtBirth } from "@/lib/pds/sexAtBirthExtract";
+import { getDocumentAiTokens, remapTokensToLegalSpace, type DocToken } from "@/lib/pds/documentAiTokens";
+import { createDocumentAiClient, getProcessorName } from "@/lib/gcp/documentAi";
 import { buildSearchablePdfFromOriginalAndTokens } from "@/lib/pds/searchablePdf";
 import { extractDobFromPersonalInfoRow } from "@/lib/pds/dobRowExtract";
 import { parsePdsDobToIso, safeParseDateToIso, validateDobToIso, validatePersonName } from "@/lib/pds/validators";
@@ -30,6 +32,34 @@ import { extractAppointmentFields, parseAppointmentDate } from "@/lib/appointmen
 import { extractPdsOwnerFromTextFallback } from "@/lib/ownerDetect/pdsOwner";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout:${label}`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
+async function buildMultipagePdfFromPngs(pngPages: Buffer[]) {
+  const pdfDoc = await PDFDocument.create();
+  for (const png of pngPages) {
+    const img = await pdfDoc.embedPng(png);
+    const page = pdfDoc.addPage([img.width, img.height]);
+    page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+  }
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
 
 function normalizeNameForMatch(s: string) {
   return String(s || "")
@@ -92,52 +122,28 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
+    const workerSecret = String(process.env.OCR_WORKER_SECRET || "").trim();
+    const reqSecret = String(request.headers.get("x-ocr-worker-secret") || "").trim();
+    const isWorker = Boolean(workerSecret) && reqSecret === workerSecret;
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const supabase: any = isWorker ? createSupabaseAdminClient() : await createSupabaseServerClient();
 
-    const user = session?.user;
-    if (!user) {
-      return new NextResponse("Unauthorized", { status: 401 });
-    }
+    let updatedById: string | null = null;
 
-  async function buildMultipagePdfFromImages(
-    pages: Array<{ bytes: Buffer; mimeType: string; pageIndex: number | null; filename: string | null }>
-  ): Promise<{ pdfBytes: Buffer; pageCount: number; pageIndexesUsed: number[] }> {
-    let sharpMod: any;
-    try {
-      sharpMod = (await import("sharp")).default;
-    } catch {
-      throw new Error("sharp not installed");
-    }
+    if (!isWorker) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    const pdf = await PDFDocument.create();
-    const pageIndexesUsed: number[] = [];
-
-    for (const p of pages) {
-      const mt = String(p.mimeType || "").toLowerCase();
-      if (mt === "application/pdf") {
-        throw new Error("Batch contains a PDF; upload only images for multi-page OCR");
-      }
-      if (!mt.startsWith("image/")) {
-        throw new Error(`Unsupported page mime type in batch: ${p.mimeType}`);
+      const user = session?.user;
+      if (!user) {
+        return new NextResponse("Unauthorized", { status: 401 });
       }
 
-      // Convert to PNG for deterministic embed + metadata.
-      const pngBytes = await sharpMod(p.bytes).png().toBuffer();
-      const img = await pdf.embedPng(pngBytes);
-      const w = img.width;
-      const h = img.height;
-      const page = pdf.addPage([w, h]);
-      page.drawImage(img, { x: 0, y: 0, width: w, height: h });
-      if (typeof p.pageIndex === "number" && Number.isFinite(p.pageIndex)) pageIndexesUsed.push(p.pageIndex);
+      updatedById = String(user.id);
     }
 
-    const out = await pdf.save();
-    return { pdfBytes: Buffer.from(out), pageCount: pdf.getPageCount(), pageIndexesUsed };
-  }
+  // buildMultipagePdfFromImages was removed because Tesseract processes pages individually.
 
   let body: any;
   try {
@@ -233,24 +239,51 @@ export async function POST(request: Request) {
   }
 
   function scorePage1FromText(text: string) {
-    const u = String(text || "").toUpperCase();
+    const u = String(text || "").toUpperCase().replace(/\s+/g, "");
     let score = 0;
-    if (u.includes("PERSONAL DATA SHEET")) score += 50;
-    if (u.includes("CS FORM") && u.includes("212")) score += 60;
+    
+    // Use joined text (no spaces) to be resilient to OCR spacing errors
+    if (u.includes("PERSONALDATASHEET")) score += 50;
+    if (u.includes("CSFORM") && u.includes("212")) score += 60;
+    if (u.includes("REVISED2017") || u.includes("REVISED2018") || u.includes("REVISED2025")) score += 30;
     if (u.includes("PERSONAL") && u.includes("INFORMATION")) score += 80;
     if (u.includes("SURNAME")) score += 35;
-    if (u.includes("FIRST") && u.includes("NAME")) score += 20;
-    if (u.includes("MIDDLE") && u.includes("NAME")) score += 20;
-    if (u.includes("DATE") && u.includes("BIRTH")) score += 20;
-    if (u.includes("SEX")) score += 10;
+    if (u.includes("FIRSTNAME")) score += 20;
+    if (u.includes("MIDDLENAME")) score += 20;
+    if (u.includes("DATEOFBIRTH") || u.includes("BIRTHDATE")) score += 25;
+    if (u.includes("SEXATBIRTH") || (u.includes("SEX") && u.includes("BIRTH"))) score += 15;
+    
+    // Add additional PDS-specific anchors for page 1
+    if (u.includes("CIVILSTATUS")) score += 10;
+    if (u.includes("CITIZENSHIP")) score += 10;
+    if (u.includes("RESIDENCETAX")) score += 10;
+    
     return score;
   }
 
   const batchDocs = await loadBatchDocuments();
   if (batchDocs.length === 0) return new NextResponse("No documents found", { status: 404 });
 
-  const client = createDocumentAiClient();
-  const name = getProcessorName();
+  let fullTextAll = "";
+  let tokensAll: DocToken[] = [];
+  let searchablePdf: any = null;
+  let searchablePdfWarning: string | null = null;
+  const pageCount = batchDocs.length;
+
+  let clientTokensToNormalize: any[] = [];
+  // VERCEL TIMEOUT BYPASS: If client sent tokens, apply them
+  const hasClientTokens = body.tokens && body.full_text;
+  if (hasClientTokens) {
+    const needsNormalization = body.tokens.some((t: any) => t.box.maxX > 2 || t.box.maxY > 2);
+    if (!needsNormalization) {
+      tokensAll = body.tokens;
+    } else {
+      clientTokensToNormalize = body.tokens;
+    }
+    fullTextAll = body.full_text;
+  }
+
+  // Setup Tesseract loop later
 
   const pages: Array<{
     document_id: string;
@@ -263,10 +296,13 @@ export async function POST(request: Request) {
     filename: string | null;
   }> = [];
 
-  // PERF: For PDS extraction we only need page 1 (personal information section).
-  // Processing all pages can take a very long time and cause the UI to appear hung.
+  // PERF: Processing all pages can take a very long time and cause timeouts.
+  // For PDS, we check up to 4 pages because page 1 (personal info) might not be the actual first file in a batch.
   const userSelectedTypeForOcrPaging = (extraction as any)?.doc_type_user_selected;
-  const maxOcrPages = userSelectedTypeForOcrPaging === "appointment" ? 3 : 1;
+  let maxOcrPages = 1;
+  if (userSelectedTypeForOcrPaging === "appointment") maxOcrPages = 3;
+  if (userSelectedTypeForOcrPaging === "pds") maxOcrPages = 4;
+  
   for (const row of batchDocs.slice(0, maxOcrPages)) {
     const doc = row.doc;
     if (!doc?.storage_bucket || !doc?.storage_path) continue;
@@ -292,58 +328,200 @@ export async function POST(request: Request) {
     .slice()
     .sort((a, b) => (Number(a.page_index ?? 1e9) - Number(b.page_index ?? 1e9)) || String(a.document_id).localeCompare(String(b.document_id)));
 
-  const pdfBuild = await buildMultipagePdfFromImages(
-    sortedPages.map((p) => ({ bytes: p.originalBytes, mimeType: p.originalMimeType, pageIndex: p.page_index, filename: p.filename }))
-  );
+  const pdfBuild = { pageIndexesUsed: sortedPages.map(p => p.page_index ?? 0) };
 
-  let docAiResult: any;
-  
-  // FAST TIMEOUT: Don't let OCR hang for hours
-  const DOC_AI_TIMEOUT = 30000; // 30 seconds max
-  
-  try {
-    // Use the client-native timeout so the underlying request is actually cancelled.
-    const processedDoc = await (client as any).processDocument(
-      {
-        name,
-        rawDocument: {
-          content: pdfBuild.pdfBytes,
-          mimeType: "application/pdf",
-        },
-      },
-      { timeout: DOC_AI_TIMEOUT }
-    );
+  if (!hasClientTokens || clientTokensToNormalize.length > 0) {
+    let didDocAi = false;
+    let docAiErrMsg = "";
+    let retryCount = 0;
+    const maxRetries = 2;
+    
+    while (!didDocAi && retryCount <= maxRetries) {
+      try {
+        const client = createDocumentAiClient();
+        const name = getProcessorName();
+        const pdfBytes = await buildMultipagePdfFromPngs(sortedPages.map((p) => p.processedPng));
+        const DOC_AI_TIMEOUT = 300000; // 5 minutes
+        
+        console.log(`[OCR] Document AI attempt ${retryCount + 1}/${maxRetries + 1}`);
+        
+        const processedDoc = await (client as any).processDocument(
+          {
+            name,
+            rawDocument: {
+              content: pdfBytes,
+              mimeType: "application/pdf",
+            },
+          },
+          { timeout: DOC_AI_TIMEOUT }
+        );
 
-    docAiResult = processedDoc?.[0];
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[OCR] Document AI failed:", msg);
-    
-    // QUICK FALLBACK: Skip slow Tesseract, just use basic metadata
-    // This prevents the 1-hour hang
-    await supabase
-      .from("extractions")
-      .update({
-        status: "error",
-        errors: { ocr: `Document AI failed: ${msg}. Please try again or check your Google Cloud credentials.` },
-        updated_by: user.id,
-      } as any)
-      .eq("id", extractionId);
-    
-    return new NextResponse(
-      JSON.stringify({ 
-        error: "OCR failed", 
-        details: msg,
-        suggestion: "Document AI is taking too long or failing. Check your internet connection and Google Cloud credentials."
-      }), 
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+        const doc = (processedDoc as any)?.document || (Array.isArray(processedDoc) ? (processedDoc as any)[0]?.document : null);
+        if (doc) {
+          fullTextAll = String(doc.text || "");
+          tokensAll = getDocumentAiTokens(doc);
+          didDocAi = true;
+          console.log("[OCR] Document AI SUCCESS!");
+        }
+      } catch (e) {
+        docAiErrMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[OCR] Document AI FAILED (attempt ${retryCount + 1}):`, docAiErrMsg);
+        
+        if (retryCount < maxRetries) {
+          const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s
+          console.log(`[OCR] Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        retryCount++;
+      }
+    }
+
+    if (didDocAi) {
+      // no-op, we already populated fullTextAll + tokensAll
+    } else {
+    const allowFallbackOcr = String(process.env.ALLOW_FALLBACK_OCR || "1").trim() === "1" || String(process.env.ALLOW_FALLBACK_OCR || "").toLowerCase() === "true";
+    if (!allowFallbackOcr && !hasClientTokens) {
+      return new NextResponse(
+        JSON.stringify({
+          error: "OCR engine unavailable",
+          details: `Google Document AI failed and server fallback OCR is disabled.${docAiErrMsg ? ` Document AI error: ${docAiErrMsg}` : ""}`,
+          suggestion:
+            "Fix Google Document AI (billing/API/service account env vars) or set ALLOW_FALLBACK_OCR=1 to enable slower fallback OCR.",
+        }),
+        { status: 502, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    let sharpMod: any;
+    try {
+      sharpMod = (await import("sharp")).default;
+    } catch {
+      throw new Error("sharp not installed");
+    }
+
+    for (let i = 0; i < sortedPages.length; i++) {
+      const page = sortedPages[i];
+      try {
+        const imgMetadata = await sharpMod(page.processedPng).metadata();
+        const resWidth = imgMetadata.width || 800;
+        const resHeight = imgMetadata.height || 800;
+
+        const isTargetPageForClient = hasClientTokens && String(page.document_id) === String(extraction.document_id);
+
+        if (isTargetPageForClient) {
+          // Normalize and Remap client-provided tokens to Legal space
+          // We apply .rotate() because browser OCR (tesseract) usually runs on the auto-oriented visible image.
+          const baseImg = sharpMod(page.originalBytes).rotate();
+          const origMetadata = await baseImg.metadata();
+          const origW = origMetadata.width || resWidth;
+          const origH = origMetadata.height || resHeight;
+          const cropBox = page.preprocessDebug?.cropBox || { left: 0, top: 0, width: origW, height: origH };
+
+          const rawTokens = body.tokens as DocToken[];
+          const remapped = remapTokensToLegalSpace(rawTokens, origW, origH, cropBox);
+          
+          for (const t of remapped) {
+            tokensAll.push({
+              ...t,
+              pageIndex: i, // Assign to correct index in the batch
+            });
+          }
+          fullTextAll += (body.full_text || "") + "\n\n";
+          console.log(`[OCR] Used remapped client tokens for page ${i} (${page.document_id})`);
+        } else {
+          // Server-side OCR (fallback engine) for this page
+          const resizedImageMod = sharpMod(page.processedPng)
+            .resize({ width: 800, withoutEnlargement: true });
+          
+          const resizedMetadata = await resizedImageMod.metadata();
+          const rWidth = resizedMetadata.width || 800;
+          const rHeight = resizedMetadata.height || 800;
+          
+          const resizedImageBuffer = await resizedImageMod.toBuffer();
+          // Use Google Cloud Vision API instead of Tesseract (which doesn't work on Vercel)
+          const ocrResult = await withTimeout(performCloudVisionOcr(resizedImageBuffer, i), 30_000, `vision_ocr_page_${i}`);
+          
+          fullTextAll += ocrResult.text + "\n\n";
+          
+          for (const t of ocrResult.tokens) {
+            tokensAll.push({
+              pageIndex: i,
+              text: t.text,
+              confidence: t.confidence,
+              box: {
+                minX: t.box.minX / rWidth,
+                maxX: t.box.maxX / rWidth,
+                minY: t.box.minY / rHeight,
+                maxY: t.box.maxY / rHeight,
+                midX: t.box.midX / rWidth,
+                midY: t.box.midY / rHeight,
+              }
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error("[OCR] OCR normalization/fallback failed for page", i, ":", err);
+        await supabase
+          .from("extractions")
+          .update({
+            status: "error",
+            errors: { ocr: `OCR failed: ${err.message}. Please try again.` },
+            updated_by: updatedById,
+          } as any)
+          .eq("id", extractionId);
+        
+        return new NextResponse(
+          JSON.stringify({
+            error: "OCR failed",
+            details: err.message,
+            suggestion: "Fallback OCR failed. Fix Google Document AI for best results, or retry with fewer pages.",
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+    }
   }
 
-  const document = docAiResult?.document;
-  const fullTextAll = document?.text || "";
-  const tokensAll = getDocumentAiTokens(document);
-  const pageCount = Array.isArray(document?.pages) ? document.pages.length : 0;
+  // BUILD SEARCHABLE PDF (Common for both paths if possible)
+  try {
+    const firstRow = batchDocs[0];
+    const firstDoc = firstRow.doc;
+    const originalBytes = await downloadDocBytes(firstDoc);
+
+    const searchableResult = await buildSearchablePdfFromOriginalAndTokens({
+      originalBytes,
+      originalMimeType: String(firstDoc.mime_type || "image/png"),
+      tokens: tokensAll,
+    });
+
+    const fileName = `searchable_${extractionId}.pdf`;
+    const storagePath = `ocr_pdfs/${extractionId}/${fileName}`;
+    const { error: uploadErr } = await supabase.storage
+      .from("ocr_results")
+      .upload(storagePath, searchableResult.bytes, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+
+    if (!uploadErr) {
+      searchablePdf = {
+        storage_bucket: "ocr_results",
+        storage_path: storagePath,
+        filename: fileName,
+      };
+    }
+  } catch (err) {
+    console.warn("[OCR] Searchable PDF generation failed:", err);
+    searchablePdfWarning = err instanceof Error ? err.message : "PDF build failed";
+  }
+
+  // Tesseract does not return a heavily structured `document` object like Google Document AI,
+  // but we can mock enough of it for downstream extractors that still rely on `document.text`.
+  const document = {
+    text: fullTextAll,
+    pages: sortedPages.map(() => ({ tokens: [] })) // Dummy structure for legacy code compatibility
+  };
 
   function pageTextFromTokens(pageIndex: number) {
     const toks = tokensAll.filter((t) => Number(t.pageIndex) === pageIndex);
@@ -383,6 +561,7 @@ export async function POST(request: Request) {
     // IMPORTANT: Keep the original full-text so textAnchor indices remain valid.
     // We only subset pages to make chosen page become pageIndex=0 for downstream extractors.
     text: fullTextAll,
+    tokens: (page1?.tokens || []).map((t: any) => ({ ...t, pageIndex: 0 })),
   };
 
   const templateAcross = (() => {
@@ -480,8 +659,6 @@ export async function POST(request: Request) {
   let ownerCandidate: any = null;
   let ownerEmployeeId: string | null = null;
   let ownerLinkWarning: string | null = null;
-  let searchablePdf: any = null;
-  let searchablePdfWarning: string | null = null;
   let photoDebug: any = { warnings: [] };
   
   // Variables for extraction debug (initialized for all types)
@@ -489,8 +666,6 @@ export async function POST(request: Request) {
   let roi: any = null;
   let sex: any = { value: null, debug: { method: null, male: null, female: null, densities: null, imageRois: null, reasons: [] } };
   let dobRow: any = { iso: null, debug: { rawDateMatch: null, usedRule: null, reasonsIfNull: [] } };
-  let rawDobCandidate: string = "";
-  let dobParsed: any = { iso: null, detectedFormat: "unknown", confidence: 0, reasonsIfNull: [] };
 
   if (docTypeFinal === "appointment") {
     const appointmentPage = pageViews[0];
@@ -589,6 +764,7 @@ export async function POST(request: Request) {
           }
           
           if (Object.keys(patch).length > 0) {
+            if (updatedById) patch.updated_by = updatedById;
             await supabase.from("employees").update(patch).eq("id", ownerEmployeeId);
           }
         } else if (filtered.length > 1) {
@@ -605,14 +781,14 @@ export async function POST(request: Request) {
     const page1TemplateVersion = templateAcross.version;
     console.log("[DEBUG PDS] Starting PDS extraction, template version:", page1TemplateVersion);
     
-    const anchor = extractOwnerByAnchors(page1Doc, { templateVersion: page1TemplateVersion });
+    anchor = extractOwnerByAnchors(page1Doc, { templateVersion: page1TemplateVersion });
     console.log("[DEBUG PDS] Anchor extraction result:", {
       hasOwner: !!anchor.owner,
       owner: anchor.owner,
       debug: anchor.debug,
     });
     
-    const roi =
+    roi =
       page1TemplateVersion === "2018"
         ? extractOwnerFromTokensRoi2018(page1Doc)
         : page1TemplateVersion === "2025"
@@ -717,6 +893,7 @@ export async function POST(request: Request) {
           }
           
           if (Object.keys(patch).length > 0) {
+            if (updatedById) patch.updated_by = updatedById;
             await supabase.from("employees").update(patch).eq("id", ownerEmployeeId);
           }
         } else if (filtered.length > 1) {
@@ -857,7 +1034,7 @@ export async function POST(request: Request) {
         }
       }
 
-      const coarseWindow: NormBox = { x: 0.55, y: 0.35, w: 0.43, h: 0.57 };
+      const coarseWindow: NormBox = { x: 0.50, y: 0.30, w: 0.48, h: 0.65 }; // Expanded window
       let visionCandidates: Array<{ roi: NormBox; score: number; reasons: string[] }> = [];
       try {
         visionCandidates = await findPhotoFrameCandidatesByVision({
@@ -947,14 +1124,14 @@ export async function POST(request: Request) {
       photoDebug.candidates = bestAttempt.candidates;
       photoDebug.photoLabelBox = bestAttempt.photoLabelBox;
       photoDebug.thumbmarkLabelBox = bestAttempt.thumbLabelBox;
-      photoDebug.coarseWindow = { x: 0.55, y: 0.35, w: 0.43, h: 0.57 };
+      photoDebug.coarseWindow = { x: 0.50, y: 0.30, w: 0.48, h: 0.65 };
       photoDebug.faceDetected = Boolean((bestAttempt.cropped as any)?.debug?.faceLike);
       photoDebug.trim = (bestAttempt.cropped as any)?.debug?.trim ?? null;
       if (bestAttempt.roi) {
         photoDebug.chosen = { roi: bestAttempt.roi, method: photoDebug.method as any, faceDetected: photoDebug.faceDetected };
       }
 
-      const allowNoFace = bestAttempt.croppedMethod === "vision" && (bestAttempt.candidates?.[0]?.contrastScore ?? 0) >= 0.35;
+      const allowNoFace = bestAttempt.croppedMethod === "vision" && (bestAttempt.candidates?.[0]?.contrastScore ?? 0) >= 0.25; // Lowered threshold from 0.35
       const pass = Boolean((bestAttempt.cropped as any)?.debug?.faceLike) || allowNoFace;
       if (!pass) {
         photoDebug.warnings.push("no_face_and_no_strong_frame");
@@ -985,6 +1162,34 @@ export async function POST(request: Request) {
     photoDebug.warnings.push(`photo_extract_failed:${msg}`);
   }
 
+  (photoDebug as any).pageCount = pageCount;
+
+  if (docTypeFinal === "pds") {
+    const hasOwner = Boolean(ownerCandidate && (ownerCandidate as any).last_name && (ownerCandidate as any).first_name);
+    const hasPhoto = Boolean((photoDebug as any)?.storedPath);
+    if (!hasOwner && !hasPhoto) {
+      await supabase
+        .from("extractions")
+        .update({
+          status: "error",
+          errors: {
+            ocr: "OCR finished but no Personal Information and no ID photo could be extracted. Check scan quality and/or use Google Document AI billing-enabled project.",
+          },
+          updated_by: updatedById,
+        } as any)
+        .eq("id", chosenExtractionId);
+
+      return new NextResponse(
+        JSON.stringify({
+          error: "OCR produced no extractable fields",
+          details: "No owner_candidate and no extracted photo",
+          suggestion: "Ensure the document is a clear PDS scan/photo. If using Document AI, confirm billing is enabled and the OCR processor is correct. Then retry.",
+        }),
+        { status: 422, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  }
+
   await supabase
     .from("extractions")
     .update({
@@ -999,11 +1204,11 @@ export async function POST(request: Request) {
           dates: {
             ...((extraction as any).raw_extracted_json?.debug?.dates || null),
             dob: {
-              raw: rawDobCandidate || null,
-              iso: dobParsed.iso,
-              detectedFormat: (dobParsed as any).detectedFormat ?? "unknown",
-              confidence: (dobParsed as any).confidence ?? 0,
-              reasonsIfNull: dobParsed.iso ? [] : ((dobParsed as any).reasonsIfNull ?? []),
+              raw: null,
+              iso: null,
+              detectedFormat: "unknown",
+              confidence: 0,
+              reasonsIfNull: [],
             },
           },
           formFieldCount: null,
@@ -1079,8 +1284,8 @@ export async function POST(request: Request) {
           },
           searchablePdfWarning,
           dob: {
-            raw: (dobRow.debug.rawDateMatch ?? rawDobCandidate) || null,
-            parsedIso: dobRow.iso ?? dobParsed.iso,
+            raw: (dobRow.debug.rawDateMatch) || null,
+            parsedIso: dobRow.iso,
             parseRuleUsed: dobRow.debug.usedRule ?? null,
             reasonsIfNull: dobRow.iso ? [] : dobRow.debug.reasonsIfNull,
             rawDebug: dobRow.debug,
@@ -1136,7 +1341,7 @@ export async function POST(request: Request) {
       doc_type_final: docTypeFinal,
       doc_type_detected: docTypeDetected,
       doc_type_mismatch_warning: docTypeMismatchWarning,
-      updated_by: user.id,
+      updated_by: updatedById,
     } as any)
     .eq("id", chosenExtractionId);
 

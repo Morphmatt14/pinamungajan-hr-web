@@ -31,12 +31,25 @@ export type RoiExtractDebug = {
   rejected: Record<string, string[]>;
 };
 
+const LABEL_WORDS = new Set([
+  "SURNAME", "FIRST", "MIDDLE", "NAME", "DATE", "OF", "BIRTH", "DOB",
+  "MIDDLLE", "MIDLE", "MIDDL", "SURNAM", "SURNANE", "F1RST", "F1RSTNAME",
+  "B1RTH", "DAT", "BIRTHDATE", "EXTENSION", "JR", "SR", "III", "IV"
+]);
+
 function clean(s: string) {
   return String(s || "")
     .replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, "-")
     .replace(/[^0-9A-Za-z\-\/\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cleanAndRemoveLabels(s: string): string {
+  const cleaned = clean(s);
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const filtered = words.filter(w => !LABEL_WORDS.has(w.toUpperCase()));
+  return filtered.join(" ").trim();
 }
 
 function insideRoi(box: TokenBox, roi: Roi) {
@@ -83,9 +96,9 @@ export function extractOwnerFromTokensRoi(document: any): { owner: OwnerCandidat
   const extTokens = tokensRaw.filter((t) => t.pageIndex === pageIndex && insideRoi(t.box, PDS2025_PAGE1_ROIS.name_extension));
   const dobTokens = tokensRaw.filter((t) => t.pageIndex === pageIndex && insideRoi(t.box, PDS2025_PAGE1_ROIS.date_of_birth));
 
-  const surnameRaw = joinTokensLinewise(surnameTokens);
-  const firstRaw = joinTokensLinewise(firstTokens);
-  const middleRaw = joinTokensLinewise(middleTokens);
+  const surnameRaw = cleanAndRemoveLabels(joinTokensLinewise(surnameTokens));
+  const firstRaw = cleanAndRemoveLabels(joinTokensLinewise(firstTokens));
+  const middleRaw = cleanAndRemoveLabels(joinTokensLinewise(middleTokens));
   const extRaw = joinTokensLinewise(extTokens);
   const dobRaw = joinTokensLinewise(dobTokens);
 

@@ -18,8 +18,9 @@ export function detectPdsTemplateVersionFromText(fullText: string): {
     return { version: "2025", evidence: { matched } };
   }
 
-  if (u.includes("REVISED 2018") || u.includes("(REVISED 2018") || u.includes("REVISED, 2018")) {
-    matched.push("revised_2018");
+  if (u.includes("REVISED 2018") || u.includes("(REVISED 2018") || u.includes("REVISED, 2018") || 
+      u.includes("REVISED 2017") || u.includes("(REVISED 2017") || u.includes("REVISED, 2017")) {
+    matched.push("revised_2018_or_2017");
     return { version: "2018", evidence: { matched } };
   }
 

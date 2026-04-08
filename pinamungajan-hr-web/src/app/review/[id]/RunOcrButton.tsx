@@ -1,16 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export function RunOcrButton({ extractionId }: { extractionId: string }) {
   const router = useRouter();
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [state, setState] = useState<
     | { status: "idle" }
     | { status: "running" }
     | { status: "done" }
     | { status: "error"; message: string }
   >({ status: "idle" });
+
+  useEffect(() => {
+    if (state.status !== "running") {
+      setElapsedMs(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const t = window.setInterval(() => {
+      setElapsedMs(Date.now() - startedAt);
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [state.status]);
 
   async function readErrorMessage(res: Response) {
     try {
@@ -40,14 +54,18 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
     try {
       setState({ status: "running" });
 
-      const url = `${window.location.origin}/api/ocr`;
+      const controller = new AbortController();
+      // Server-side OCR may take several minutes (Document AI + retries + fallback OCR)
+      const timeoutMs = 420_000;
+      const t = window.setTimeout(() => controller.abort(), timeoutMs);
 
-      const res = await fetch(url, {
+      const res = await fetch(`/api/ocr`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ extraction_id: extractionId }),
-      });
+        signal: controller.signal,
+      }).finally(() => window.clearTimeout(t));
 
       if (!res.ok) {
         const message = await readErrorMessage(res);
@@ -56,12 +74,17 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
       }
 
       setState({ status: "done" });
-      try {
-        router.refresh();
-      } catch {
-        // ignore
-      }
+      router.refresh();
     } catch (e) {
+      console.error("Client OCR Error:", e);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setState({
+          status: "error",
+          message:
+            "OCR is taking too long and the browser request timed out. Please retry. If this keeps happening, reduce pages or fix Google Document AI / Cloud Vision credentials.",
+        });
+        return;
+      }
       setState({
         status: "error",
         message: e instanceof Error ? e.message : "Failed to run OCR",
@@ -70,7 +93,19 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-1">
+      {state.status === "running" ? (
+        <div className="w-full max-w-[420px]">
+          <div className="h-1 w-full overflow-hidden rounded bg-slate-200">
+            <div className="h-full w-1/3 animate-pulse rounded bg-slate-900" />
+          </div>
+          <div className="mt-1 text-[11px] text-slate-600">
+            Processing OCR… {Math.max(0, Math.round(elapsedMs / 1000))}s
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={run}
@@ -87,6 +122,7 @@ export function RunOcrButton({ extractionId }: { extractionId: string }) {
           {state.message || "OCR failed"}
         </span>
       ) : null}
+      </div>
     </div>
   );
 }

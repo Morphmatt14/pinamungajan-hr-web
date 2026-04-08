@@ -8,6 +8,8 @@ import { cookies } from "next/headers";
 import { SexConfirm } from "@/app/review/[id]/SexConfirm";
 import { ExtractedPhotoPanel } from "@/app/review/[id]/ExtractedPhotoPanel";
 import { DebugExtractionPanel } from "@/app/review/[id]/DebugExtractionPanel";
+import { DocTypePanel } from "@/app/review/[id]/DocTypePanel";
+import { isAdminUser } from "@/lib/auth/roles";
 
 export default async function ReviewDetailPage({
   params,
@@ -20,6 +22,16 @@ export default async function ReviewDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (!user || !isAdminUser(user)) {
+    return (
+      <AppShell title="Review Extraction">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Only admin users can access review details.
+        </div>
+      </AppShell>
+    );
+  }
 
   const { data: extraction, error } = await supabase
     .from("extractions")
@@ -94,66 +106,13 @@ export default async function ReviewDetailPage({
           </div>
 
           {/* Document Type Section */}
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            <div className="text-sm font-semibold text-slate-900">Document Type</div>
-            <div className="mt-2 grid gap-2 text-sm">
-              <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="grid gap-2 grid-cols-1 sm:grid-cols-3">
-                  <div className="rounded-md bg-white px-2 py-1">
-                    <div className="text-[11px] font-semibold text-slate-900">User Selected</div>
-                    <div className="mt-0.5 text-xs text-slate-900">
-                      {(extraction as any)?.doc_type_user_selected || "Auto-detect"}
-                    </div>
-                  </div>
-                  <div className="rounded-md bg-white px-2 py-1">
-                    <div className="text-[11px] font-semibold text-slate-900">Detected</div>
-                    <div className="mt-0.5 text-xs text-slate-900">
-                      {(extraction as any)?.doc_type_detected || "—"}
-                    </div>
-                  </div>
-                  <div className="rounded-md bg-white px-2 py-1">
-                    <div className="text-[11px] font-semibold text-slate-900">Final Type Used</div>
-                    <div className="mt-0.5 text-xs font-semibold text-blue-700">
-                      {(extraction as any)?.doc_type_final || "—"}
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Mismatch Warning */}
-                {(extraction as any)?.doc_type_mismatch_warning && (
-                  <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
-                    <div className="text-xs font-semibold text-amber-900">
-                      ⚠️ Type Mismatch Detected
-                    </div>
-                    <div className="mt-1 text-xs text-amber-800">
-                      The system detected this document as <strong>{(extraction as any)?.doc_type_detected}</strong>, 
-                      but you selected <strong>{(extraction as any)?.doc_type_user_selected}</strong>. 
-                      Please review and confirm the correct type.
-                    </div>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded border border-amber-300 bg-white px-2 py-1 text-[11px] text-amber-700 hover:bg-amber-100"
-                        onClick={() => {
-                          // This would trigger a re-extraction with the detected type
-                          // For now, just a placeholder action
-                          alert("Re-running OCR with detected type: " + (extraction as any)?.doc_type_detected);
-                        }}
-                      >
-                        Use Detected Type
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
-                      >
-                        Keep Selected Type
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <DocTypePanel
+            extractionId={id}
+            docTypeUserSelected={(extraction as any)?.doc_type_user_selected}
+            docTypeDetected={(extraction as any)?.doc_type_detected}
+            docTypeFinal={(extraction as any)?.doc_type_final}
+            docTypeMismatchWarning={Boolean((extraction as any)?.doc_type_mismatch_warning)}
+          />
 
           {/* TYPE-SPECIFIC EXTRACTION PANELS */}
           {(extraction as any)?.doc_type_final === "appointment" ? (

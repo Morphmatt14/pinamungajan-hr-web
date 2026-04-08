@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
+import { enqueueOcrJob } from "@/lib/qstash/publish";
+import { isAdminUser } from "@/lib/auth/roles";
 
 export const runtime = "nodejs";
 
@@ -47,6 +49,9 @@ export async function POST(request: Request) {
 
   if (userError || !user) {
     return new NextResponse(`Unauthorized${userError?.message ? `: ${userError.message}` : ""}`, { status: 401 });
+  }
+  if (isAdminUser(user)) {
+    return new NextResponse("Forbidden: admin accounts cannot upload documents", { status: 403 });
   }
 
   let form: FormData;
@@ -203,11 +208,25 @@ export async function POST(request: Request) {
     outExtractionId = String(extraction.id);
   }
 
+  let ocrEnqueued = false;
+  let ocrEnqueueError: string | null = null;
+  if (outExtractionId) {
+    try {
+      await enqueueOcrJob({ extractionId: outExtractionId });
+      ocrEnqueued = true;
+    } catch (e) {
+      ocrEnqueueError = e instanceof Error ? e.message : String(e);
+      console.error("[UPLOAD] Failed to enqueue OCR job:", ocrEnqueueError);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     batch_id: batchId,
     document_set_id: documentSetId,
     extraction_id: outExtractionId,
     document_id: doc.id,
+    ocr_enqueued: ocrEnqueued,
+    ocr_enqueue_error: ocrEnqueueError,
   });
 }

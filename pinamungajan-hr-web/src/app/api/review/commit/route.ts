@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { computeAgeAndGroupFromDobIso } from "@/lib/age";
 import { revalidatePath } from "next/cache";
+import { isAdminUser } from "@/lib/auth/roles";
 
 function normalizeNameForMatch(s: string) {
   return String(s || "")
@@ -45,6 +46,9 @@ export async function POST(request: Request) {
 
   if (userError || !user) {
     return new NextResponse("Unauthorized", { status: 401 });
+  }
+  if (!isAdminUser(user)) {
+    return new NextResponse("Forbidden", { status: 403 });
   }
 
   let body: any;
@@ -197,6 +201,7 @@ export async function POST(request: Request) {
     console.log("[DEBUG] Patch to apply:", JSON.stringify(patch, null, 2));
 
     if (Object.keys(patch).length > 0) {
+      patch.updated_by = user.id;
       // Appointment data updates the employee record directly
       const { error: updateError, data: updateData } = await supabase.from("employees").update(patch).eq("id", employeeId).select();
       if (updateError) {
@@ -276,6 +281,7 @@ export async function POST(request: Request) {
         safePatch.age_group = patch.age_group;
       }
       if (Object.keys(safePatch).length > 0) {
+        safePatch.updated_by = user.id;
         await supabase.from("employees").update(safePatch).eq("id", primaryEmployeeId);
       }
     }
@@ -314,11 +320,25 @@ export async function POST(request: Request) {
 
   if (candErr) return new NextResponse(candErr.message, { status: 400 });
 
-  const normKey = normalizeNameForMatch(`${last} ${first} ${ownerCandidate.middle_name || ""}`);
+  // Match based on last_name and first_name only (middle name can differ due to OCR variations)
+  const normKey = normalizeNameForMatch(`${last} ${first}`);
 
   const possible = (candidates || []).filter((c: any) => {
-    const cKey = normalizeNameForMatch(`${c.last_name || ""} ${c.first_name || ""} ${c.middle_name || ""}`);
+    const cKey = normalizeNameForMatch(`${c.last_name || ""} ${c.first_name || ""}`);
     if (cKey !== normKey) return false;
+    // Also check if middle names are compatible (one could be initial of the other)
+    const ownerMiddle = String(ownerCandidate.middle_name || "").toUpperCase().trim();
+    const candMiddle = String(c.middle_name || "").toUpperCase().trim();
+    if (ownerMiddle && candMiddle) {
+      // If middle names are different, check if one is an initial of the other
+      // e.g., "N" vs "Napoles" or "N." vs "Napoles"
+      const ownerInitial = ownerMiddle.charAt(0);
+      const candInitial = candMiddle.charAt(0);
+      // Allow match if initials match or one contains the other
+      if (ownerInitial !== candInitial && !ownerMiddle.includes(candMiddle) && !candMiddle.includes(ownerMiddle)) {
+        return false;
+      }
+    }
     return looksLikeSamePersonLoose(ownerCandidate, c);
   });
 
@@ -354,82 +374,41 @@ export async function POST(request: Request) {
     }
   }
 
-  // If there are possible matches (or DOB missing), require confirmation unless forceCreateNew.
-  if (!forceCreateNew && possible.length > 0) {
-    return NextResponse.json({
-      ok: false,
-      needs_confirmation: true,
-      reason: dobIso ? "possible_duplicate" : "dob_missing",
-      owner: ownerCandidate,
-      candidates: possible.slice(0, 5).map((c: any) => ({
-        id: String(c.id),
-        last_name: c.last_name,
-        first_name: c.first_name,
-        middle_name: c.middle_name,
-        date_of_birth: c.date_of_birth,
-      })),
-    });
+  // If there are possible matches, auto-link to the first one for appointments
+  // or require confirmation for PDS documents
+  if (possible.length > 0) {
+    // For appointment documents, auto-link to the first matching candidate
+    // since we don't create new employees from appointments
+    const targetId = String(possible[0].id);
+    
+    await linkAllDocs(targetId);
+    await saveAppointmentFields(targetId);
+
+    await supabase
+      .from("extractions")
+      .update({
+        status: "committed",
+        raw_extracted_json: {
+          ...(extraction as any).raw_extracted_json,
+          owner_employee_id: targetId,
+        },
+        updated_by: user.id,
+      })
+      .eq("id", extractionId);
+
+    try {
+      revalidatePath("/masterlist");
+    } catch {
+      // ignore
+    }
+
+    return NextResponse.json({ ok: true, employee_id: targetId, action: "linked" });
   }
 
-  // Create new employee WITH appointment data if available
-  const rawJson = (extraction as any)?.raw_extracted_json;
-  const appointmentData = rawJson?.appointment_data || (extraction as any)?.appointment_data;
-  
-  const computedAge = dobIso ? computeAgeAndGroupFromDobIso(dobIso) : { age: null, age_group: null };
-
-  const { data: created, error: createErr } = await supabase
-    .from("employees")
-    .insert({
-      last_name: ownerCandidate.last_name,
-      first_name: ownerCandidate.first_name,
-      middle_name: ownerCandidate.middle_name,
-      name_extension: ownerCandidate.name_extension,
-      date_of_birth: dobIso,
-      gender: ownerCandidate.gender,
-      age: computedAge.age,
-      age_group: computedAge.age_group,
-      created_by: user.id,
-      // Appointment data (if available from extraction)
-      position_title: appointmentData?.position_title || null,
-      office_department: appointmentData?.office_department || null,
-      sg: appointmentData?.sg || null,
-      step: appointmentData?.step || null,
-      monthly_salary: appointmentData?.monthly_salary || null,
-      annual_salary: appointmentData?.annual_salary || null,
-      date_hired: appointmentData?.appointment_date || null,
-      // Required NOT NULL columns in this schema
-      tenure_years: appointmentData?.appointment_date ? Math.floor((new Date().getTime() - new Date(appointmentData.appointment_date).getTime()) / (1000 * 60 * 60 * 24 * 365)) : 0,
-      tenure_months: 0,
-    })
-    .select("id")
-    .single();
-
-  if (createErr || !created?.id) {
-    return new NextResponse(createErr?.message || "Failed to create employee", { status: 400 });
-  }
-
-  const newId = String(created.id);
-
-  await linkAllDocs(newId);
-  await saveAppointmentFields(newId);
-
-  await supabase
-    .from("extractions")
-    .update({
-      status: "committed",
-      raw_extracted_json: {
-        ...(extraction as any).raw_extracted_json,
-        owner_employee_id: newId,
-      },
-      updated_by: user.id,
-    })
-    .eq("id", extractionId);
-
-  try {
-    revalidatePath("/masterlist");
-  } catch {
-    // ignore
-  }
-
-  return NextResponse.json({ ok: true, employee_id: newId, action: "created" });
+  // If no candidates found, return error instead of creating new employee
+  // Appointments should only update existing PDS records
+  return new NextResponse(
+    "No matching employee found in masterlist. Please ensure the employee has a PDS document uploaded and processed first.",
+    { status: 400 }
+  );
 }

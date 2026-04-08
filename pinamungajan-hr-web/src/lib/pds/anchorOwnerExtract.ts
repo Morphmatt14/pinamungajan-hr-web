@@ -81,7 +81,7 @@ function groupTokensIntoLines(tokens: DocToken[]) {
 
   for (const t of sorted) {
     const h = Math.max(0.0001, t.box.maxY - t.box.minY);
-    const tol = Math.max(0.008, h * 0.8);
+    const tol = Math.max(0.012, h * 0.9); // Increased tolerance for hand-aligned forms
 
     const last = lines[lines.length - 1];
     if (!last) {
@@ -176,22 +176,28 @@ function findLabelCandidates(
   const out: LabelCandidate[] = [];
 
   const matchLine = (txt: string) => {
-    const u = txt.toUpperCase();
+    const u = txt.toUpperCase().replace(/\s+/g, "");
     if (label === "SURNAME") {
       if (u.includes("SURNAME")) return true;
       if (u.includes("SUR") && u.includes("NAME")) return true;
+      // Fuzzy OCR: SURNANE, SURNAIE
+      if (u.includes("SURNA") && (u.includes("NE") || u.includes("ME") || u.includes("IE"))) return true;
       return false;
     }
     if (label === "FIRST NAME") {
-      if (u.includes("FIRST NAME") || u.includes("FIRSTNAME")) return true;
+      if (u.includes("FIRSTNAME") || u.includes("F1RSTNAME")) return true;
+      if (u.includes("FIRST") && u.includes("NAME")) return true;
       return false;
     }
     if (label === "MIDDLE NAME") {
-      if (u.includes("MIDDLE NAME") || u.includes("MIDDLENAME")) return true;
+      if (u.includes("MIDDLENAME") || u.includes("M1DDLENAME")) return true;
+      if (u.includes("MIDDLE") && u.includes("NAME")) return true;
       return false;
     }
     if (label === "DATE OF BIRTH") {
-      if (u.includes("DATE OF BIRTH") || u.includes("DOB")) return true;
+      if (u.includes("DATEOFBIRTH") || u.includes("BIRTHDATE")) return true;
+      if (u.includes("DATE") && (u.includes("BIRTH") || u.includes("B1RTH"))) return true;
+      if (u.includes("DOB")) return true;
       return false;
     }
     return false;
@@ -301,13 +307,19 @@ function buildValueRoiFromColumns(labelColRight: number, lineBox: TokenBox, valu
   return { x: xStart, y: yStart, w: Math.max(0, xEnd - xStart), h: Math.max(0, yEnd - yStart) };
 }
 
-function tokensInRowAndRoi(tokens: DocToken[], roi: NormalizedRect, rowBox: TokenBox) {
+function tokensInRowAndRoi(tokens: DocToken[], roi: NormalizedRect, rowBox: TokenBox, labelBox?: TokenBox) {
   const x2 = roi.x + roi.w;
   const y2 = roi.y + roi.h;
   return tokens.filter((t) => {
     const inRoi = t.box.midX >= roi.x && t.box.midX <= x2 && t.box.midY >= roi.y && t.box.midY <= y2;
     if (!inRoi) return false;
-    return yOverlapRatio(t.box, rowBox) >= 0.6;
+    // Exclude label-column tokens (prevents "MIDDLE", "NAME" from being included).
+    // IMPORTANT: Do NOT exclude by Y-overlap alone, because value tokens share the same row Y-range.
+    if (labelBox) {
+      const padX = 0.01;
+      if (t.box.midX <= labelBox.maxX + padX) return false;
+    }
+    return yOverlapRatio(t.box, rowBox) >= 0.5;
   });
 }
 
@@ -398,11 +410,25 @@ function pickBestLabelSet(
   return { surname: best.s, first: best.f, middle: best.m };
 }
 
-function extractValueForRow(pageTokens: DocToken[], rowBox: TokenBox, labelColRight: number, valueWidth: number) {
+const LABEL_WORDS = new Set([
+  "SURNAME", "FIRST", "MIDDLE", "NAME", "DATE", "OF", "BIRTH", "DOB",
+  "MIDDLLE", "MIDLE", "MIDDL", "SURNAM", "SURNANE", "F1RST", "F1RSTNAME",
+  "B1RTH", "DAT", "BIRTHDATE"
+]);
+
+function cleanExtractedValue(raw: string): string {
+  // Remove common label words that might have been picked up
+  const words = raw.split(/\s+/).filter(Boolean);
+  const cleaned = words.filter(w => !LABEL_WORDS.has(w.toUpperCase())).join(" ");
+  return cleaned.trim();
+}
+
+function extractValueForRow(pageTokens: DocToken[], rowBox: TokenBox, labelColRight: number, valueWidth: number, labelBox?: TokenBox) {
   const roi = buildValueRoiFromColumns(labelColRight, rowBox, valueWidth);
-  const selected = tokensInRowAndRoi(pageTokens, roi, rowBox);
+  const selected = tokensInRowAndRoi(pageTokens, roi, rowBox, labelBox);
   const raw = joinTokensSmart(selected);
-  return { roi, selected, raw };
+  const cleaned = cleanExtractedValue(raw);
+  return { roi, selected, raw: cleaned };
 }
 
 export function extractOwnerByAnchors(
@@ -488,7 +514,7 @@ export function extractOwnerByAnchors(
       lineText: cand.lineText,
     };
     surnameField.labelBox = rectFromBox(cand.labelBox);
-    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, valueWidth);
+    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, valueWidth, cand.labelBox);
     surnameField.valueRoi = v.roi;
     surnameField.selectedTokens = v.selected.map((t) => ({ text: String(t.text || "").trim(), box: rectFromBox(t.box) }));
     surnameField.extractedRaw = v.raw;
@@ -509,7 +535,7 @@ export function extractOwnerByAnchors(
       lineText: cand.lineText,
     };
     firstField.labelBox = rectFromBox(cand.labelBox);
-    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, valueWidth);
+    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, valueWidth, cand.labelBox);
     firstField.valueRoi = v.roi;
     firstField.selectedTokens = v.selected.map((t) => ({ text: String(t.text || "").trim(), box: rectFromBox(t.box) }));
     firstField.extractedRaw = v.raw;
@@ -530,7 +556,7 @@ export function extractOwnerByAnchors(
       lineText: cand.lineText,
     };
     middleField.labelBox = rectFromBox(cand.labelBox);
-    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, valueWidth);
+    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, valueWidth, cand.labelBox);
     middleField.valueRoi = v.roi;
     middleField.selectedTokens = v.selected.map((t) => ({ text: String(t.text || "").trim(), box: rectFromBox(t.box) }));
     middleField.extractedRaw = v.raw;
@@ -551,7 +577,7 @@ export function extractOwnerByAnchors(
       lineText: cand.lineText,
     };
     dobField.labelBox = rectFromBox(cand.labelBox);
-    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, 0.22);
+    const v = extractValueForRow(pageTokens.filter(inPersonalInfo), cand.lineBox, labelColRight, 0.22, cand.labelBox);
     dobField.valueRoi = v.roi;
     dobField.selectedTokens = v.selected.map((t) => ({ text: String(t.text || "").trim(), box: rectFromBox(t.box) }));
     dobField.extractedRaw = v.raw;

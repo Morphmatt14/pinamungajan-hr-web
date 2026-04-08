@@ -9,11 +9,47 @@ export type OwnerCandidate = {
   confidence: number;
 };
 
+const LABEL_WORDS_TO_FILTER = new Set([
+  "NAME", "SURNAME", "FIRST", "MIDDLE", "LAST", "DATE", "BIRTH", "OF",
+  "MIDDLLE", "MIDLE", "SURNAM", "SURNANE", "F1RST", "B1RTH"
+]);
+
 function cleanToken(s: string) {
-  return s
+  const cleaned = s
     .replace(/[^A-Za-z\-\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  // Filter out label words
+  const words = cleaned.split(" ").filter(Boolean);
+  const filtered = words.filter(w => !LABEL_WORDS_TO_FILTER.has(w.toUpperCase()));
+  return filtered.join(" ").trim();
+}
+
+// Aggressive post-processing to remove any remaining label words from final result
+function removeLabelWordsFromResult(result: string | null): string | null {
+  if (!result) return null;
+  
+  // First, try to separate concatenated words like "AbeNAME" -> "Abe NAME"
+  let cleaned = result
+    .replace(/([a-z])(NAME|SURNAME|FIRST|MIDDLE|BIRTH)/gi, '$1 $2')
+    .replace(/(NAME|SURNAME|FIRST|MIDDLE|BIRTH)([a-z])/gi, '$1 $2');
+  
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const filtered = words.filter(w => {
+    const upper = w.toUpperCase();
+    // Skip pure label words
+    if (LABEL_WORDS_TO_FILTER.has(upper)) return false;
+    // Skip words that contain label substrings
+    if (upper.includes("NAME") && upper.length <= 8) return false;
+    if (upper === "SURNAM" || upper === "SURNAME" || upper === "SURNANE") return false;
+    if (upper === "FIRST" || upper === "F1RST") return false;
+    if (upper === "MIDDLE" || upper === "MIDDLLE" || upper === "MIDLE") return false;
+    if (upper === "BIRTH" || upper === "B1RTH") return false;
+    if (upper === "DATE" || upper === "OF") return false;
+    return true;
+  });
+  
+  return filtered.join(" ").trim() || null;
 }
 
 function isJunkFieldValue(cleaned: string) {
@@ -136,12 +172,44 @@ function chooseNamePart(value: string | null, which: "last" | "first" | "middle"
 }
 
 function trimToDob(value: string) {
-  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  const cleaned = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[^0-9A-Za-z\/\-\.\s]/g, " ")
+    .trim();
   if (!cleaned) return null;
-  const m = cleaned.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/) || cleaned.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-  if (!m) return null;
-  const raw = m[0];
-  const parsed = parsePdsDobToIso(raw, "PDS_DDMMYYYY");
+  
+  // Try multiple date patterns
+  // Pattern 1: dd/mm/yyyy or dd-mm-yyyy
+  const m1 = cleaned.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+  if (m1) {
+    const day = m1[1].padStart(2, '0');
+    const month = m1[2].padStart(2, '0');
+    const year = m1[3];
+    // Validate reasonable date
+    const d = parseInt(day);
+    const m = parseInt(month);
+    const y = parseInt(year);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1900 && y <= 2100) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+  
+  // Pattern 2: yyyy/mm/dd
+  const m2 = cleaned.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if (m2) {
+    const year = m2[1];
+    const month = m2[2].padStart(2, '0');
+    const day = m2[3].padStart(2, '0');
+    const d = parseInt(day);
+    const m = parseInt(month);
+    const y = parseInt(year);
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1900 && y <= 2100) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+  
+  // Fallback to original parser
+  const parsed = parsePdsDobToIso(cleaned, "PDS_DDMMYYYY");
   return parsed.iso;
 }
  
@@ -511,11 +579,21 @@ function detectPdsOwnerCandidateSpatial(document: any): OwnerCandidate | null {
     // Avoid the right side of the table (name extension / citizenship / etc).
     const maxX = field === "surname" ? 0.45 : 0.50;
 
+    // Filter out tokens that are likely label words
+    const isLabelWord = (t: string) => {
+      const u = t.toUpperCase();
+      if (LABEL_WORDS_TO_FILTER.has(u)) return true;
+      if (u === "NAME" || u === "SURNAME" || u === "FIRST" || u === "MIDDLE" || u === "BIRTH") return true;
+      if (u.includes("NAME") && u.length <= 8) return true;
+      return false;
+    };
+
     const candidates = all
       .filter((t) => t.pageIndex === row.pageIndex)
       .filter((t) => Math.abs(t.box.midY - row.midY) <= band)
       .filter((t) => t.box.minX >= minX)
       .filter((t) => t.box.minX <= maxX)
+      .filter((t) => !isLabelWord(t.t)) // Exclude label tokens
       .sort((a, b) => a.box.minX - b.box.minX);
 
     // Read a contiguous cluster of tokens to avoid concatenating other far-away tokens.
@@ -737,9 +815,9 @@ function detectPdsOwnerCandidateSpatial(document: any): OwnerCandidate | null {
     .sort((a, b) => b.length - a.length)[0];
 
   return {
-    first_name: chosenFirst || null,
-    middle_name: chosenMiddle || null,
-    last_name: recoveredLast || betterLast || chosenLast || null,
+    first_name: removeLabelWordsFromResult(chosenFirst),
+    middle_name: removeLabelWordsFromResult(chosenMiddle),
+    last_name: removeLabelWordsFromResult(recoveredLast || betterLast || chosenLast),
     date_of_birth: dob || null,
     gender: null,
     confidence: 0.97,
@@ -778,24 +856,32 @@ export function extractPdsOwnerFromTextFallback(fullText: string): OwnerCandidat
   
   // Extract surname - look for pattern: SURNAME followed by value on same or next line
   // Handle various OCR formats: "SURNAME Abe", "SURNAME\nAbe", "2. SURNAME Abe"
-  const surnameMatch = section.match(/SURNAME[:\s]*\n?\s*([A-Za-z\-]+(?:\s+[A-Za-z\-]+)?)/i) ||
-                       section.match(/(?:^|\n)\s*\d*\.?\s*SURNAME[:\s]+([A-Za-z\-]+(?:\s+[A-Za-z\-]+)?)/im) ||
-                       section.match(/SUR(?:\s*NAME)?[:\s]*\n?\s*([A-Za-z]{2,}(?:\s+[A-Za-z\-]+)?)/i);
+  const surnameMatch = section.match(/SURNAME[:\s]*\n?\s*([A-Za-z\-']+(?:\s+[A-Za-z\-']+)?)/i) ||
+                       section.match(/(?:^|\n)\s*\d*\.?\s*SURNAME[:\s]+([A-Za-z\-']+(?:\s+[A-Za-z\-']+)?)/im) ||
+                       section.match(/SUR(?:\s*NAME)?[:\s]*\n?\s*([A-Za-z']{2,}(?:\s+[A-Za-z\-']+)?)/i) ||
+                       section.match(/SURN[A-Z]{1}E[:\s]*\n?\s*([A-Za-z']{2,})/i);
   
   // Extract first name
-  const firstNameMatch = section.match(/FIRST\s*NAME[:\s]*\n?\s*([A-Za-z\-]+(?:\s+[A-Za-z\-]+)?)/i) ||
-                         section.match(/(?:^|\n)\s*\d*\.?\s*FIRST\s*NAME[:\s]+([A-Za-z\-]+(?:\s+[A-Za-z\-]+)?)/im) ||
-                         section.match(/FIRST(?:\s*NAME)?[:\s]*\n?\s*([A-Za-z]{2,}(?:\s+[A-Za-z\-]+)?)/i);
+  const firstNameMatch = section.match(/FIRST\s*NAME[:\s]*\n?\s*([A-Za-z\-']+(?:\s+[A-Za-z\-']+)?)/i) ||
+                         section.match(/(?:^|\n)\s*\d*\.?\s*FIRST\s*NAME[:\s]+([A-Za-z\-']+(?:\s+[A-Za-z\-']+)?)/im) ||
+                         section.match(/FIRST(?:\s*NAME)?[:\s]*\n?\s*([A-Za-z']{2,}(?:\s+[A-Za-z\-']+)?)/i);
   
   // Extract middle name
-  const middleNameMatch = section.match(/MIDDLE\s*NAME[:\s]*\n?\s*([A-Za-z\-]*(?:\s+[A-Za-z\-]+)?)/i) ||
-                          section.match(/(?:^|\n)\s*\d*\.?\s*MIDDLE\s*NAME[:\s]+([A-Za-z\-]*(?:\s+[A-Za-z\-]+)?)/im) ||
-                          section.match(/MIDDLE(?:\s*NAME)?[:\s]*\n?\s*([A-Za-z\-]*)/i);
+  const middleNameMatch = section.match(/MIDDLE\s*NAME[:\s]*\n?\s*([A-Za-z\-']*(?:\s+[A-Za-z\-']+)?)/i) ||
+                          section.match(/(?:^|\n)\s*\d*\.?\s*MIDDLE\s*NAME[:\s]+([A-Za-z\-']*(?:\s+[A-Za-z\-']+)?)/im) ||
+                          section.match(/MIDDLE(?:\s*NAME)?[:\s]*\n?\s*([A-Za-z\-']*)/i);
   
   // Extract date of birth - look for dd/mm/yyyy or mm/dd/yyyy pattern near date of birth label
+  // Also try to find any date pattern in the section as fallback
   const dobMatch = section.match(/DATE\s*OF\s*BIRTH[:\s]*\n?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i) ||
                    section.match(/(?:^|\n)\s*\d*\.?\s*DATE\s*OF\s*BIRTH[:\s]+(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/im) ||
-                   section.match(/BIRTH(?:\s*DATE)?[:\s]*\n?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i);
+                   section.match(/BIRTH(?:\s*DATE)?[:\s]*\n?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i) ||
+                   section.match(/D\.?O\.?B\.?[:\s]*\n?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i) ||
+                   // More flexible: date pattern after BIRTH or DOB anywhere in section
+                   section.match(/(?:BIRTH|DOB)[^\n]{0,30}(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i) ||
+                   section.match(/(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})[^\n]{0,20}(?:BIRTH|DOB)/i) ||
+                   // Just find any date pattern in the first 1000 chars of section
+                   section.slice(0, 1000).match(/(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/);
   
   let surname = surnameMatch?.[1]?.trim() || null;
   let firstName = firstNameMatch?.[1]?.trim() || null;
@@ -831,6 +917,11 @@ export function extractPdsOwnerFromTextFallback(fullText: string): OwnerCandidat
   }
   
   if (!surname || !firstName) return null;
+
+  // Apply label filtering to final results
+  surname = removeLabelWordsFromResult(surname);
+  firstName = removeLabelWordsFromResult(firstName);
+  middleName = removeLabelWordsFromResult(middleName);
 
   return {
     first_name: firstName,
