@@ -11,16 +11,16 @@ export default async function ReviewPage() {
 
   if (!user || !isAdminUser(user)) {
     return (
-      <AppShell title="Review Queue">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Only admin users can access pending reviews.
+      <AppShell title="Review queue">
+        <div className="app-alert-warning text-sm">
+          Only administrator accounts can open the review queue.
         </div>
       </AppShell>
     );
   }
 
   return (
-    <AppShell title="Review Queue">
+    <AppShell title="Review queue">
       <ReviewList />
     </AppShell>
   );

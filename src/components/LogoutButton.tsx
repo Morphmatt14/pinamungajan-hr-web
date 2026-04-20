@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LogOut } from "lucide-react";
 
 export function LogoutButton() {
   const [loading, setLoading] = useState(false);
@@ -9,7 +10,7 @@ export function LogoutButton() {
     <button
       type="button"
       disabled={loading}
-      className="rounded-md border px-3 py-1.5 text-sm hover:bg-zinc-50 disabled:opacity-50"
+      className="app-btn-secondary py-2 pl-3 pr-3 text-xs sm:text-sm"
       onClick={async () => {
         try {
           setLoading(true);
@@ -20,7 +21,8 @@ export function LogoutButton() {
         }
       }}
     >
-      {loading ? "Logging out..." : "Logout"}
+      <LogOut className="h-4 w-4" aria-hidden />
+      {loading ? "Signing out…" : "Log out"}
     </button>
   );
 }

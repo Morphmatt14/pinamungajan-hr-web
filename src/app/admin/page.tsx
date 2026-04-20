@@ -14,17 +14,21 @@ export default async function AdminPage() {
   if (!user || !isAdminUser(user)) {
     return (
       <AppShell title="Admin">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-          <p className="font-semibold">Access restricted</p>
-          <p className="mt-2 text-sm opacity-90">
+        <div className="app-alert-warning max-w-2xl space-y-3">
+          <p className="font-semibold text-app-text">Access restricted</p>
+          <p className="text-sm leading-relaxed text-app-muted">
             This page is only for administrator accounts. Ask your Supabase project owner to set{" "}
-            <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/60">app_metadata.role</code> to{" "}
-            <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/60">&quot;admin&quot;</code> for your user
-            (see <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/60">supabase-admin-role.sql</code> in
-            the repo).
+            <code className="rounded-md bg-app-surface-muted px-1.5 py-0.5 font-mono text-xs text-app-text">
+              app_metadata.role
+            </code>{" "}
+            to{" "}
+            <code className="rounded-md bg-app-surface-muted px-1.5 py-0.5 font-mono text-xs text-app-text">
+              &quot;admin&quot;
+            </code>{" "}
+            for your user (see <code className="font-mono text-xs">supabase-admin-role.sql</code> in the repo).
           </p>
-          <Link href="/" className="mt-4 inline-block text-sm font-medium text-blue-700 underline dark:text-blue-400">
-            Back to dashboard
+          <Link href="/" className="app-link inline-block text-sm">
+            ← Back to dashboard
           </Link>
         </div>
       </AppShell>
@@ -32,16 +36,16 @@ export default async function AdminPage() {
   }
 
   return (
-    <AppShell title="Admin — HR activity">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          Overview of document processing and employee record changes so administrators can review HR staff work.
+    <AppShell title="Administration">
+      <div className="app-card p-6 sm:p-8">
+        <p className="app-prose-muted max-w-3xl">
+          Overview of document processing and employee record changes so administrators can review HR staff activity.
         </p>
-        <div className="mt-6">
+        <div className="mt-8">
           <AdminActivityClient />
         </div>
       </div>
-      <div className="mt-6">
+      <div className="mt-8">
         <StaffManagementClient />
       </div>
     </AppShell>

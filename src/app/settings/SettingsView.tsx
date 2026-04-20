@@ -19,38 +19,44 @@ export async function SettingsView() {
     .single();
 
   if (error) {
-    return <div className="text-sm text-red-700">Error: {error.message}</div>;
+    return <div className="app-alert-danger text-sm">Error: {error.message}</div>;
   }
 
   const s = data as SettingsRow;
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-6">
       <NormalizePdsToggle initialEnabled={initialEnabled} />
-      <div className="rounded-lg border bg-white p-4">
-        <div className="text-sm font-medium">Defaults</div>
-        <div className="mt-2 grid gap-2 text-sm">
-          <div>
-            <span className="font-medium">SG range:</span> {s.sg_min}–{s.sg_max}
+      <section className="app-card p-5 sm:p-6">
+        <h2 className="text-base font-semibold text-app-text">Defaults</h2>
+        <dl className="mt-4 grid gap-3 text-sm">
+          <div className="flex flex-wrap justify-between gap-2 border-b border-app-border pb-3">
+            <dt className="text-app-muted">SG range</dt>
+            <dd className="font-medium text-app-text">
+              {s.sg_min}–{s.sg_max}
+            </dd>
           </div>
-          <div>
-            <span className="font-medium">Salary tolerance:</span> {s.salary_tolerance}%
+          <div className="flex flex-wrap justify-between gap-2 border-b border-app-border pb-3">
+            <dt className="text-app-muted">Salary tolerance</dt>
+            <dd className="font-medium text-app-text">{s.salary_tolerance}%</dd>
           </div>
-          <div>
-            <span className="font-medium">Appointment grace days:</span> {s.appointment_grace_days}
+          <div className="flex flex-wrap justify-between gap-2 border-b border-app-border pb-3">
+            <dt className="text-app-muted">Appointment grace days</dt>
+            <dd className="font-medium text-app-text">{s.appointment_grace_days}</dd>
           </div>
-          <div>
-            <span className="font-medium">Allow 66+ bracket:</span> {s.allow_66_plus ? "ON" : "OFF"}
+          <div className="flex flex-wrap justify-between gap-2">
+            <dt className="text-app-muted">Allow 66+ bracket</dt>
+            <dd className="font-medium text-app-text">{s.allow_66_plus ? "Yes" : "No"}</dd>
           </div>
-        </div>
-      </div>
+        </dl>
+      </section>
 
-      <div className="rounded-lg border bg-white p-4">
-        <div className="text-sm font-medium">Age brackets</div>
-        <pre className="mt-2 max-h-[260px] overflow-auto rounded bg-zinc-50 p-3 text-xs">
+      <section className="app-card p-5 sm:p-6">
+        <h2 className="text-base font-semibold text-app-text">Age brackets</h2>
+        <pre className="mt-4 max-h-[260px] overflow-auto rounded-xl border border-app-border bg-app-surface-muted p-4 font-mono text-xs text-app-text">
           {JSON.stringify(s.age_brackets, null, 2)}
         </pre>
-      </div>
+      </section>
     </div>
   );
 }

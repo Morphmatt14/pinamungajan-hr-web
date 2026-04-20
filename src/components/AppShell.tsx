@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
+import { usePathname } from "next/navigation";
+import { BrandLogo } from "@/components/BrandLogo";
 import { LogoutButton } from "@/components/LogoutButton";
 import { PlusCircle, ClipboardCheck, Users, Settings, Sun, Moon, Shield } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -16,6 +17,7 @@ export function AppShell({
   title: string;
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [role, setRole] = useState<string | null>(null);
@@ -39,67 +41,61 @@ export function AppShell({
   const canUpload = role !== "admin";
   const canReview = role === "admin";
 
+  function navClass(href: string) {
+    const active = pathname === href || (href !== "/" && pathname.startsWith(href));
+    return `app-nav-link ${active ? "app-nav-link-active" : ""}`;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors">
-      <header className="border-b border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-sm transition-colors">
+    <div className="min-h-screen bg-app-bg transition-colors">
+      <header className="sticky top-0 z-40 border-b border-app-border bg-app-surface/95 backdrop-blur-md transition-colors">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-            <Link href="/" className="flex items-center gap-3">
-              <Image
-                src="/pinamungajan-logo.png"
-                alt="LGU Pinamungajan"
-                width={160}
-                height={48}
-                className="h-11 w-auto max-w-[200px] object-contain object-left"
-                priority
-              />
-              <div className="flex flex-col border-l border-slate-200 pl-3 dark:border-slate-600">
-                <span className="text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">HR System</span>
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-400">
-                  Pinamungajan
-                </span>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8">
+            <Link href="/" className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-app-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg">
+              <BrandLogo variant="header" priority />
+              <div className="flex flex-col border-l border-app-border pl-3">
+                <span className="text-lg font-bold leading-tight text-app-text">HR System</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-app-primary">Pinamungajan</span>
               </div>
             </Link>
 
-            <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 sm:gap-3">
+            <nav className="flex flex-wrap items-center gap-1 text-sm sm:gap-1" aria-label="Main">
               {canUpload ? (
-                <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" href="/upload">
-                  <PlusCircle className="h-4 w-4" />
-                  <span>Add Document</span>
+                <Link className={navClass("/upload")} href="/upload">
+                  <PlusCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  <span>Add document</span>
                 </Link>
               ) : null}
               {canReview ? (
-                <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:text-amber-700 dark:hover:text-amber-400 transition-colors" href="/review">
-                  <ClipboardCheck className="h-4 w-4" />
-                  <span>Pending Reviews</span>
+                <Link className={navClass("/review")} href="/review">
+                  <ClipboardCheck className="h-4 w-4 shrink-0" aria-hidden />
+                  <span>Reviews</span>
                 </Link>
               ) : null}
-              <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-700 dark:hover:text-blue-400 transition-colors" href="/masterlist">
-                <Users className="h-4 w-4" />
+              <Link className={navClass("/masterlist")} href="/masterlist">
+                <Users className="h-4 w-4 shrink-0" aria-hidden />
                 <span>Masterlist</span>
               </Link>
               {isAdmin ? (
-                <Link
-                  className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-violet-50 dark:hover:bg-violet-900/30 hover:text-violet-800 dark:hover:text-violet-300 transition-colors"
-                  href="/admin"
-                >
-                  <Shield className="h-4 w-4" />
+                <Link className={navClass("/admin")} href="/admin">
+                  <Shield className="h-4 w-4 shrink-0" aria-hidden />
                   <span>Admin</span>
                 </Link>
               ) : null}
-              <Link className="flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100 transition-colors" href="/settings">
-                <Settings className="h-4 w-4" />
+              <Link className={navClass("/settings")} href="/settings">
+                <Settings className="h-4 w-4 shrink-0" aria-hidden />
                 <span>Settings</span>
               </Link>
             </nav>
           </div>
 
-          <div className="flex items-center gap-4 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto">
             {mounted && (
               <button
+                type="button"
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 transition-colors"
-                title="Toggle Dark Mode"
+                className="app-btn-ghost rounded-full p-2"
+                title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               >
                 {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
               </button>
@@ -109,16 +105,12 @@ export function AppShell({
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5 sm:py-8">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-900 dark:bg-blue-950/50 dark:text-blue-200">
-              LGU Pinamungajan · Human Resources
-            </div>
-            <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 sm:text-2xl">{title}</h1>
-          </div>
-        </div>
-        <div className="mt-6">{children}</div>
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:py-10">
+        <header className="border-b border-app-border pb-6">
+          <p className="app-eyebrow">LGU Pinamungajan · Human resources</p>
+          <h1 className="app-section-title mt-3">{title}</h1>
+        </header>
+        <div className="mt-8">{children}</div>
       </main>
     </div>
   );

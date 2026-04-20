@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function MasterlistPage() {
   return (
-    <AppShell title="Employee Masterlist">
+    <AppShell title="Employee masterlist">
       <MasterlistClient />
     </AppShell>
   );

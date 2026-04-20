@@ -11,16 +11,16 @@ export default async function UploadPage() {
 
   if (user && isAdminUser(user)) {
     return (
-      <AppShell title="Upload">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Admin accounts are read/review only. Upload is restricted to HR staff accounts.
+      <AppShell title="Upload documents">
+        <div className="app-alert-warning text-sm">
+          Administrator accounts are read-only here. Uploads are limited to HR staff accounts.
         </div>
       </AppShell>
     );
   }
 
   return (
-    <AppShell title="Upload">
+    <AppShell title="Upload documents">
       <UploadClient />
     </AppShell>
   );

@@ -12,7 +12,7 @@ export async function ReviewList() {
     .limit(50);
 
   if (error) {
-    return <div className="text-sm text-red-700">Error: {error.message}</div>;
+    return <div className="app-alert-danger text-sm">Error: {error.message}</div>;
   }
 
   const rows = (data || []) as (ExtractionRow & { batch_id?: string | null; document_set_id?: string | null; created_by?: string | null })[];
@@ -100,41 +100,43 @@ export async function ReviewList() {
     });
 
   return (
-    <div className="rounded-lg border bg-white">
-      <div className="border-b px-4 py-3 text-sm font-medium">Latest extractions</div>
-      <div className="divide-y">
+    <div className="app-card overflow-hidden">
+      <div className="app-card-header">Latest extractions</div>
+      <div className="divide-y divide-app-border">
         {rows.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-zinc-800">No extractions yet.</div>
+          <div className="px-4 py-8 text-sm text-app-muted">No extractions yet.</div>
         ) : (
           <>
             {groups.map(({ kind, id, group, fileCount }: { kind: "document_set" | "batch"; id: string; group: typeof rows; fileCount: number }) => (
-              <details key={`${kind}:${id}`} className="px-4 py-3">
+              <details key={`${kind}:${id}`} className="group px-4 py-4">
                 <summary className="cursor-pointer list-none">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-medium">
-                        {kind === "document_set" ? "Document set" : "Batch upload"} ({fileCount} files)
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-sm font-semibold text-app-text">
+                        {kind === "document_set" ? "Document set" : "Batch upload"} · {fileCount} file{fileCount === 1 ? "" : "s"}
                       </div>
-                      <div className="text-xs text-zinc-800 font-mono">{id}</div>
-                      <div className="mt-1 text-xs text-zinc-700">Latest: {new Date(group[group.length - 1].updated_at).toLocaleString()}</div>
-                      <div className="mt-1 text-[11px] text-zinc-700 font-mono">
-                        Uploaded by: {group[0]?.created_by ? String(group[0].created_by).slice(0, 8) + "..." : "unknown"}
+                      <div className="break-all font-mono text-xs text-app-muted">{id}</div>
+                      <div className="text-xs text-app-muted">
+                        Updated {new Date(group[group.length - 1].updated_at).toLocaleString()}
+                      </div>
+                      <div className="font-mono text-[11px] text-app-muted">
+                        By {group[0]?.created_by ? String(group[0].created_by).slice(0, 8) + "…" : "unknown"}
                       </div>
                     </div>
-                    <Link className="text-sm underline" href={`/review/${group[0].id}`}>
+                    <Link className="app-link shrink-0 text-sm" href={`/review/${group[0].id}`}>
                       Open first
                     </Link>
                   </div>
                 </summary>
-                <div className="mt-3 rounded-md border bg-white">
-                  <div className="divide-y">
+                <div className="mt-4 overflow-hidden rounded-xl border border-app-border bg-app-surface-muted/50">
+                  <div className="divide-y divide-app-border">
                     {group.map((r: (typeof rows)[number]) => (
-                      <div key={r.id} className="flex items-center justify-between px-3 py-2">
-                        <div>
-                          <div className="text-xs font-semibold text-slate-900">{r.status}</div>
-                          <div className="text-[11px] text-zinc-800 font-mono">{r.id}</div>
+                      <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-app-primary">{r.status}</div>
+                          <div className="mt-0.5 break-all font-mono text-[11px] text-app-muted">{r.id}</div>
                         </div>
-                        <Link className="text-xs underline" href={`/review/${r.id}`}>
+                        <Link className="app-link shrink-0 text-xs" href={`/review/${r.id}`}>
                           Open
                         </Link>
                       </div>
@@ -145,16 +147,16 @@ export async function ReviewList() {
             ))}
 
             {singles.map((r: (typeof rows)[number]) => (
-              <div key={r.id} className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium">{r.status}</div>
-                  <div className="text-xs text-zinc-800 font-mono">{r.id}</div>
-                  <div className="mt-1 text-xs text-zinc-700">Uploaded: {new Date(r.created_at).toLocaleString()}</div>
-                  <div className="mt-1 text-[11px] text-zinc-700 font-mono">
-                    Uploaded by: {r.created_by ? String(r.created_by).slice(0, 8) + "..." : "unknown"}
+              <div key={r.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-1">
+                  <div className="text-sm font-semibold text-app-text">{r.status}</div>
+                  <div className="break-all font-mono text-xs text-app-muted">{r.id}</div>
+                  <div className="text-xs text-app-muted">Uploaded {new Date(r.created_at).toLocaleString()}</div>
+                  <div className="font-mono text-[11px] text-app-muted">
+                    By {r.created_by ? String(r.created_by).slice(0, 8) + "…" : "unknown"}
                   </div>
                 </div>
-                <Link className="text-sm underline" href={`/review/${r.id}`}>
+                <Link className="app-link shrink-0 text-sm" href={`/review/${r.id}`}>
                   Open
                 </Link>
               </div>

@@ -1,0 +1,61 @@
+OTP-ONLY EMAIL (NO MAGIC LINK) — Supabase checklist
+====================================================
+
+Your Next.js app already calls signInWithOtp(email) WITHOUT emailRedirectTo, which is required for code-based OTP.
+
+If the email STILL shows a "Log in" / magic link, the problem is almost always the dashboard template, not the app.
+
+A) Fix the "Magic Link" template (most common)
+---------------------------------------------
+1. Dashboard: Authentication → Email → Templates → Magic Link.
+2. Subject: change "Your Magic Link" to something like: Your sign-in code
+3. Open the "Source" / HTML editor (not rich text only).
+4. Select EVERYTHING in the body (Ctrl+A), delete it. You must remove any leftover:
+   - {{ .ConfirmationURL }}
+   - <a href=...> around a login link
+   - Default "Follow this link" / "Log In" text from Supabase
+5. Paste ONLY the contents of magic-link-otp-only.html from this repo (no HTML comments).
+6. Save the template.
+7. Send yourself a NEW OTP (old emails are unchanged).
+
+Rules:
+- The body may contain {{ .Token }} (the 6-digit code).
+- Do NOT include {{ .ConfirmationURL }} if you want zero magic link in the HTML.
+- Do not add {{ .RedirectTo }} as a clickable link unless you want a URL in the email.
+
+B) First-time signup uses a different template
+-----------------------------------------------
+If the user has never confirmed email, Supabase may send "Confirm sign up" instead of "Magic Link".
+For OTP-only there too: edit Authentication → Email Templates → Confirm sign up
+and use the same pattern ({{ .Token }} only, no ConfirmationURL), or disable "Confirm email" for OTP flows in your Auth settings (project policy — review security before changing).
+
+C) Gmail / Outlook still show a "button"
+----------------------------------------
+Some clients promote the first URL they see. If your template has NO URL, the button should disappear.
+If a link still appears, search the saved template for "http", "href", "supabase.co/auth", "verify".
+
+D) Best option when you need 100% control
+------------------------------------------
+Use Supabase "Send Email" Auth Hook + your own provider (e.g. Resend) so YOU build the email body and only include the OTP string from email_data.token.
+
+Docs:
+https://supabase.com/docs/guides/auth/auth-hooks/send-email-hook
+https://supabase.com/docs/guides/functions/examples/auth-send-email-hook-react-email-resend
+
+E) UI shows "Error sending magic link email" (400 on /api/auth/otp)
+--------------------------------------------------------------------
+That message comes from Supabase when the MAIL SEND failed — not because your app is using a magic link.
+signInWithOtp(email) without emailRedirectTo still triggers the same GoTrue mailer; the error text is misleading.
+
+Fix:
+1. Authentication → Email → SMTP Settings: every field saved (host, port, username, password). Gmail needs an App Password.
+2. Authentication → Logs: open the failed event for the real SMTP error (auth timeout, bad credentials, etc.).
+3. Until SMTP works, delivery will fail for many addresses on built-in email.
+
+F) Placeholder emails: masterlist only (not HR staff logins)
+------------------------------------------------------------
+HR staff accounts in Admin → HR staff must use a real email so Supabase Auth can deliver OTP / password reset.
+
+If you later add optional placeholder addresses for masterlist employees (patient records) — for example a synthetic
+`email` on `public.employees` — use a dedicated server env such as PATIENT_PLACEHOLDER_EMAIL_DOMAIN on that code path
+only. Do not use that pattern for Supabase Auth users.

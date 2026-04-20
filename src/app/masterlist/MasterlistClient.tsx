@@ -114,42 +114,41 @@ export function MasterlistClient() {
   return (
     <div className="flex gap-4">
       <div className="min-w-0 flex-1">
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex-1">
-            <div className="text-sm font-medium text-slate-900">Search employees</div>
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <label className="text-sm font-medium text-app-text" htmlFor="masterlist-search">
+              Search employees
+            </label>
             <input
+              id="masterlist-search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by last, first, or middle name"
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+              placeholder="Last name, first name, or middle name"
+              className="app-input mt-1.5"
             />
-            <div className="mt-1 text-xs text-slate-600">
-              Total: <span className="font-mono">{state.total}</span>
-              {state.status === "loading" ? " • Loading…" : ""}
-              {state.status === "error" ? " • Error" : ""}
-            </div>
-            {state.status === "error" ? (
-              <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-                {state.message}
-              </div>
-            ) : null}
+            <p className="mt-1.5 text-xs text-app-muted">
+              Total: <span className="font-mono text-app-text">{state.total}</span>
+              {state.status === "loading" ? " · Loading…" : ""}
+              {state.status === "error" ? " · Error" : ""}
+            </p>
+            {state.status === "error" ? <div className="app-alert-danger mt-3 text-xs">{state.message}</div> : null}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 disabled:opacity-50"
+              className="app-btn-secondary px-3 py-2 text-sm"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               Prev
             </button>
-            <div className="text-sm text-slate-700">
-              Page <span className="font-mono">{page}</span> / <span className="font-mono">{pageCount}</span>
+            <div className="min-w-[5.5rem] text-center text-sm tabular-nums text-app-muted">
+              <span className="font-mono text-app-text">{page}</span> / <span className="font-mono">{pageCount}</span>
             </div>
             <button
               type="button"
-              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 disabled:opacity-50"
+              className="app-btn-secondary px-3 py-2 text-sm"
               disabled={page >= pageCount}
               onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
             >
@@ -158,32 +157,32 @@ export function MasterlistClient() {
           </div>
         </div>
 
-        <div className="rounded-lg border bg-white overflow-hidden">
+        <div className="app-table-wrap overflow-hidden">
           <div className="overflow-auto">
             <table className="w-full min-w-[1400px] text-sm">
-              <thead className="bg-zinc-50 text-zinc-900">
+              <thead className="app-table-head">
                 <tr>
-                  <th className="px-3 py-2 text-left">Last name</th>
-                  <th className="px-3 py-2 text-left">First name</th>
-                  <th className="px-3 py-2 text-left">Middle name</th>
-                  <th className="px-3 py-2 text-left">Date of birth</th>
-                  <th className="px-3 py-2 text-left">Tenure</th>
-                  <th className="px-3 py-2 text-left">Office</th>
-                  <th className="px-3 py-2 text-left">Position</th>
-                  <th className="px-3 py-2 text-left">SG</th>
-                  <th className="px-3 py-2 text-left">Step</th>
-                  <th className="px-3 py-2 text-left">Monthly</th>
-                  <th className="px-3 py-2 text-left">Annual</th>
-                  <th className="px-3 py-2 text-left">Gender</th>
-                  <th className="px-3 py-2 text-left">View</th>
-                  <th className="px-3 py-2 text-left">Delete</th>
+                  <th className="px-3 py-3 text-left">Last name</th>
+                  <th className="px-3 py-3 text-left">First name</th>
+                  <th className="px-3 py-3 text-left">Middle name</th>
+                  <th className="px-3 py-3 text-left">Date of birth</th>
+                  <th className="px-3 py-3 text-left">Tenure</th>
+                  <th className="px-3 py-3 text-left">Office</th>
+                  <th className="px-3 py-3 text-left">Position</th>
+                  <th className="px-3 py-3 text-left">SG</th>
+                  <th className="px-3 py-3 text-left">Step</th>
+                  <th className="px-3 py-3 text-left">Monthly</th>
+                  <th className="px-3 py-3 text-left">Annual</th>
+                  <th className="px-3 py-3 text-left">Gender</th>
+                  <th className="px-3 py-3 text-left">View</th>
+                  <th className="px-3 py-3 text-left">Delete</th>
                 </tr>
               </thead>
               <tbody>
                 {state.employees.map((e) => (
                   <tr
                     key={e.id}
-                    className="border-t text-zinc-900 hover:bg-slate-50 cursor-pointer"
+                    className="cursor-pointer border-t border-app-border text-app-text transition-colors hover:bg-app-surface-muted"
                     onClick={() => setSelectedEmployeeId(e.id)}
                   >
                     <td className="px-3 py-2 whitespace-nowrap">{e.last_name}</td>
@@ -201,7 +200,7 @@ export function MasterlistClient() {
                     <td className="px-3 py-2" onClick={(ev) => ev.stopPropagation()}>
                       <button
                         type="button"
-                        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                        className="app-btn-secondary px-2 py-1 text-xs"
                         onClick={() => setSelectedEmployeeId(e.id)}
                       >
                         View
@@ -213,8 +212,8 @@ export function MasterlistClient() {
                   </tr>
                 ))}
                 {state.employees.length === 0 ? (
-                  <tr className="border-t">
-                    <td className="px-3 py-6 text-center text-slate-600" colSpan={14}>
+                  <tr className="border-t border-app-border">
+                    <td className="px-3 py-10 text-center text-app-muted" colSpan={14}>
                       No employees found.
                     </td>
                   </tr>

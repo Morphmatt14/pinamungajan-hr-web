@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
-import { enqueueOcrJob } from "@/lib/qstash/publish";
+import { triggerOcrJob } from "@/lib/ocr/triggerOcrJob";
 import { isAdminUser } from "@/lib/auth/roles";
 
 export const runtime = "nodejs";
@@ -212,7 +212,7 @@ export async function POST(request: Request) {
   let ocrEnqueueError: string | null = null;
   if (outExtractionId) {
     try {
-      await enqueueOcrJob({ extractionId: outExtractionId });
+      await triggerOcrJob({ extractionId: outExtractionId });
       ocrEnqueued = true;
     } catch (e) {
       ocrEnqueueError = e instanceof Error ? e.message : String(e);

@@ -307,22 +307,19 @@ export function UploadClient() {
   }
 
   return (
-    <div className="rounded-xl border bg-white p-5 shadow-sm">
-      <div className="text-sm font-semibold text-slate-900">Upload document</div>
-      <div className="mt-1 text-sm text-slate-800">
-        Select document type first, then upload your files for faster processing.
-      </div>
+    <div className="app-card p-6 sm:p-8">
+      <h2 className="text-base font-semibold text-app-text">Upload document</h2>
+      <p className="app-prose-muted mt-1">Choose the document type, then add files. Processing is faster when the type matches the file.</p>
 
-      <form className="mt-4 flex flex-col gap-3" onSubmit={onUpload}>
-        {/* Document Type Selector */}
-        <div className="rounded-lg border bg-slate-50 p-3">
-          <label className="block text-xs font-semibold text-slate-900">
-            Document Type <span className="text-red-600">*</span>
+      <form className="mt-6 flex flex-col gap-4" onSubmit={onUpload}>
+        <div className="rounded-xl border border-app-border bg-app-surface-muted p-4">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-app-muted">
+            Document type <span className="text-app-danger">*</span>
           </label>
           <select
             value={docTypeUserSelected}
             onChange={(e) => setDocTypeUserSelected(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+            className="app-input mt-2"
             required
           >
             {DOCUMENT_TYPE_OPTIONS.map((opt) => (
@@ -331,32 +328,31 @@ export function UploadClient() {
               </option>
             ))}
           </select>
-          <div className="mt-1 text-[11px] text-slate-600">
-            {docTypeUserSelected === "auto-detect" 
-              ? "System will automatically detect document type. Slower but recommended for unknown documents."
-              : "System will skip detection and extract fields for this specific type."}
-          </div>
+          <p className="app-prose-muted mt-2 text-xs">
+            {docTypeUserSelected === "auto-detect"
+              ? "The system detects the document type automatically. Use for mixed or unknown files."
+              : "Detection is skipped; fields are extracted for the selected type only."}
+          </p>
         </div>
 
-        {/* Separate Extraction Toggle */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-3 rounded-xl border border-app-border bg-app-surface-muted/80 p-4">
           <input
             type="checkbox"
             id="separate-extraction"
             checked={separateExtractionPerFile}
             onChange={(e) => setSeparateExtractionPerFile(e.target.checked)}
-            className="rounded border-slate-300"
+            className="mt-0.5 h-4 w-4 rounded border-app-border text-app-primary focus:ring-app-ring"
           />
-          <label htmlFor="separate-extraction" className="text-xs text-slate-700">
-            Create separate extraction per file (default: batch as one document set)
+          <label htmlFor="separate-extraction" className="text-sm text-app-text">
+            <span className="font-medium">Separate extraction per file</span>
+            <span className="app-prose-muted mt-0.5 block text-xs">
+              Off: one document set for the batch. On: each file gets its own extraction.
+            </span>
           </label>
         </div>
 
-        {/* File Picker - disabled until type selected */}
-        <div className="rounded-lg border bg-white p-3">
-          <label className="block text-xs font-semibold text-slate-900">
-            Select Files
-          </label>
+        <div className="rounded-xl border border-app-border bg-app-surface p-4">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-app-muted">Files</label>
           <input
             type="file"
             multiple
@@ -375,53 +371,49 @@ export function UploadClient() {
               setRows(next);
               setState({ status: "idle" });
             }}
-            className="mt-2 block w-full text-sm disabled:opacity-50"
+            className="mt-3 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-app-primary/10 file:px-3 file:py-2 file:text-sm file:font-medium file:text-app-primary hover:file:bg-app-primary/20 disabled:opacity-50"
           />
-          {!docTypeUserSelected && (
-            <div className="mt-1 text-[11px] text-amber-600">
-              Please select document type first.
-            </div>
-          )}
+          {!docTypeUserSelected && <p className="mt-2 text-xs text-app-warning">Select a document type first.</p>}
         </div>
 
-        <div className="text-xs text-slate-800">
-          Batch ID: <span className="font-mono">{batchId || "(generating...)"}</span>
-        </div>
+        <p className="text-xs text-app-muted">
+          Batch ID: <span className="font-mono text-app-text">{batchId || "(generating…)"}</span>
+        </p>
 
-        <div className="rounded-lg border bg-white">
-          <div className="border-b px-3 py-2 text-xs font-semibold text-slate-900">Selected files ({rows.length})</div>
-          <div className="max-h-[240px] overflow-auto divide-y">
+        <div className="app-table-wrap max-h-[min(18rem,50vh)] overflow-hidden">
+          <div className="app-card-header">Selected files ({rows.length})</div>
+          <div className="max-h-[240px] divide-y divide-app-border overflow-auto">
             {rows.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-slate-700">No files selected.</div>
+              <div className="px-4 py-4 text-sm text-app-muted">No files selected.</div>
             ) : (
               rows.map((r) => (
-                <div key={r.id} className="px-3 py-2">
+                <div key={r.id} className="px-4 py-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="truncate text-xs font-medium text-slate-900">{r.file.name}</div>
-                      <div className="mt-0.5 text-[11px] text-slate-700">
+                      <div className="truncate text-sm font-medium text-app-text">{r.file.name}</div>
+                      <div className="mt-0.5 text-xs text-app-muted">
                         {r.file.type || "(unknown type)"} · {formatBytes(r.file.size)}
                       </div>
                     </div>
-                    <div className="text-[11px] text-slate-700">
+                    <div className="shrink-0 text-xs font-medium capitalize text-app-muted">
                       {r.status === "uploading" ? `${Math.round(r.progress * 100)}%` : r.status}
                     </div>
                   </div>
                   {r.status === "uploading" ? (
-                    <div className="mt-1 h-2 w-full rounded bg-slate-100">
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-app-surface-muted">
                       <div
-                        className="h-2 rounded bg-blue-700"
+                        className="h-full rounded-full bg-app-primary transition-[width]"
                         style={{ width: `${Math.round(r.progress * 100)}%` }}
                       />
                     </div>
                   ) : null}
                   {r.status === "done" && r.extractionId ? (
-                    <div className="mt-1 text-[11px] text-slate-700">
-                      extraction_id: <span className="font-mono">{r.extractionId}</span>
+                    <div className="mt-2 text-xs text-app-muted">
+                      Extraction ID: <span className="font-mono text-app-text">{r.extractionId}</span>
                     </div>
                   ) : null}
                   {r.status === "error" && r.error ? (
-                    <div className="mt-1 text-[11px] text-red-700">{r.error}</div>
+                    <div className="mt-2 text-xs font-medium text-app-danger">{r.error}</div>
                   ) : null}
                 </div>
               ))
@@ -432,27 +424,23 @@ export function UploadClient() {
         <button
           type="submit"
           disabled={state.status === "uploading" || !docTypeUserSelected || rows.length === 0}
-          className="w-full rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:opacity-50"
+          className="app-btn-primary w-full py-3"
         >
-          {state.status === "uploading" ? "Working..." : "Upload & Create Extraction"}
+          {state.status === "uploading" ? "Uploading…" : "Upload and create extraction"}
         </button>
 
         {state.status === "done" ? (
-          <div className="text-sm text-slate-700">
-            Created batch: <span className="font-mono">{state.batchId}</span>
-            <div className="mt-2">
-              <a className="underline" href="/review">
-                Go to Review Queue
-              </a>
-            </div>
+          <div className="rounded-xl border border-app-success/30 bg-app-success-muted px-4 py-3 text-sm text-app-success">
+            <p>
+              Batch <span className="font-mono font-semibold">{state.batchId}</span> created.
+            </p>
+            <a className="app-link mt-2 inline-block text-sm" href="/review">
+              Go to review queue →
+            </a>
           </div>
         ) : null}
 
-        {state.status === "error" ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {state.message}
-          </div>
-        ) : null}
+        {state.status === "error" ? <div className="app-alert-warning">{state.message}</div> : null}
       </form>
     </div>
   );

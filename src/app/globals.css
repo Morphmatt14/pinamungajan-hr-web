@@ -1,41 +1,144 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* ── Semantic palette (light) ───────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --app-bg: #f1f5f9;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f8fafc;
+  --app-border: #e2e8f0;
+  --app-text: #0f172a;
+  --app-muted: #64748b;
+  --app-primary: #1d4ed8;
+  --app-primary-hover: #1e40af;
+  --app-on-primary: #ffffff;
+  --app-ring: #3b82f6;
+  --app-success: #047857;
+  --app-success-muted: #ecfdf5;
+  --app-warning: #b45309;
+  --app-warning-muted: #fffbeb;
+  --app-danger: #b91c1c;
+  --app-danger-muted: #fef2f2;
 }
 
-.dark:root,
-.dark body {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+/* ── Semantic palette (dark) ──────────────────────────────────────── */
+.dark {
+  --app-bg: #020617;
+  --app-surface: #0f172a;
+  --app-surface-muted: #1e293b;
+  --app-border: #334155;
+  --app-text: #f8fafc;
+  --app-muted: #94a3b8;
+  --app-primary: #60a5fa;
+  --app-primary-hover: #93c5fd;
+  --app-on-primary: #0f172a;
+  --app-ring: #60a5fa;
+  --app-success: #34d399;
+  --app-success-muted: rgba(6, 78, 59, 0.35);
+  --app-warning: #fbbf24;
+  --app-warning-muted: rgba(120, 53, 15, 0.35);
+  --app-danger: #f87171;
+  --app-danger-muted: rgba(127, 29, 29, 0.35);
 }
 
-:root.dark {
-  background-color: #0a0a0a;
-  color: #ededed;
+@theme inline {
+  --color-app-bg: var(--app-bg);
+  --color-app-surface: var(--app-surface);
+  --color-app-surface-muted: var(--app-surface-muted);
+  --color-app-border: var(--app-border);
+  --color-app-text: var(--app-text);
+  --color-app-muted: var(--app-muted);
+  --color-app-primary: var(--app-primary);
+  --color-app-primary-hover: var(--app-primary-hover);
+  --color-app-on-primary: var(--app-on-primary);
+  --color-app-ring: var(--app-ring);
+  --color-app-success: var(--app-success);
+  --color-app-success-muted: var(--app-success-muted);
+  --color-app-warning: var(--app-warning);
+  --color-app-warning-muted: var(--app-warning-muted);
+  --color-app-danger: var(--app-danger);
+  --color-app-danger-muted: var(--app-danger-muted);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  background-color: var(--app-bg);
+  color: var(--app-text);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* ── Reusable patterns ──────────────────────────────────────────────── */
+@layer components {
+  .app-card {
+    @apply rounded-2xl border border-app-border bg-app-surface shadow-sm;
+  }
+
+  .app-card-header {
+    @apply border-b border-app-border px-4 py-3 text-sm font-semibold text-app-text;
+  }
+
+  .app-eyebrow {
+    @apply inline-flex items-center rounded-full bg-app-primary/12 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-app-primary;
+  }
+
+  .app-section-title {
+    @apply text-lg font-semibold tracking-tight text-app-text sm:text-xl;
+  }
+
+  .app-prose-muted {
+    @apply text-sm leading-relaxed text-app-muted;
+  }
+
+  .app-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-app-primary px-4 py-2.5 text-sm font-semibold text-app-on-primary shadow-sm transition-colors hover:bg-app-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .app-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-app-border bg-app-surface px-4 py-2.5 text-sm font-semibold text-app-text shadow-sm transition-colors hover:bg-app-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-ring/25 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .app-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-app-muted transition-colors hover:bg-app-surface-muted hover:text-app-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg;
+  }
+
+  .app-input {
+    @apply w-full rounded-xl border border-app-border bg-app-surface px-3 py-2.5 text-sm text-app-text placeholder:text-app-muted/75 transition-colors focus:border-app-primary focus:outline-none focus:ring-2 focus:ring-app-ring/25;
+  }
+
+  .app-link {
+    @apply font-medium text-app-primary underline-offset-2 hover:underline;
+  }
+
+  .app-alert-warning {
+    @apply rounded-2xl border border-app-warning/35 bg-app-warning-muted px-4 py-3 text-sm text-app-warning;
+  }
+
+  .app-alert-danger {
+    @apply rounded-2xl border border-app-danger/35 bg-app-danger-muted px-4 py-3 text-sm text-app-danger;
+  }
+
+  .app-alert-info {
+    @apply rounded-2xl border border-app-primary/20 bg-app-primary/5 px-4 py-3 text-sm text-app-text;
+  }
+
+  .app-table-wrap {
+    @apply overflow-hidden rounded-xl border border-app-border bg-app-surface;
+  }
+
+  .app-table-head {
+    @apply bg-app-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-app-muted;
+  }
+
+  .app-nav-link {
+    @apply flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-app-muted transition-colors hover:bg-app-primary/10 hover:text-app-primary;
+  }
+
+  .app-nav-link-active {
+    @apply bg-app-primary/12 text-app-primary;
+  }
 }

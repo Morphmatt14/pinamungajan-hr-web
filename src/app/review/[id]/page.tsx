@@ -25,10 +25,8 @@ export default async function ReviewDetailPage({
 
   if (!user || !isAdminUser(user)) {
     return (
-      <AppShell title="Review Extraction">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Only admin users can access review details.
-        </div>
+      <AppShell title="Review extraction">
+        <div className="app-alert-warning text-sm">Only administrator accounts can open review details.</div>
       </AppShell>
     );
   }

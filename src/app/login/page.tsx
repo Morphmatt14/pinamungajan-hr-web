@@ -4,13 +4,50 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
 import { Mail, KeyRound, Eye, EyeOff, LogIn, Smartphone, ShieldCheck } from "lucide-react";
 
-const OTP_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const OTP_DISPLAY_TTL_MS = 60 * 60 * 1000; // show countdown up to 1h (Supabase default OTP validity is often 3600s)
 
 function looksLikePhone(input: string) {
   return /^\+?[0-9]{10,15}$/.test(input.trim());
+}
+
+function normalizeOtpTarget(raw: string) {
+  const t = raw.trim();
+  if (!t) return "";
+  if (looksLikePhone(t)) return t;
+  return t.toLowerCase();
+}
+
+function parseOtpDigits(raw: string) {
+  return raw.replace(/\D/g, "");
+}
+
+function createWaitForSignedIn(supabase: ReturnType<typeof createSupabaseBrowserClient>) {
+  return () =>
+    new Promise<void>((resolve) => {
+      let done = false;
+      let authSub: { unsubscribe: () => void } | null = null;
+      const timer = window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        authSub?.unsubscribe();
+        resolve();
+      }, 1200);
+
+      const sub = supabase.auth.onAuthStateChange((event) => {
+        if (done) return;
+        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+          done = true;
+          window.clearTimeout(timer);
+          authSub?.unsubscribe();
+          resolve();
+        }
+      });
+
+      authSub = sub?.data?.subscription ?? null;
+    });
 }
 
 function LoginPageInner() {
@@ -24,6 +61,7 @@ function LoginPageInner() {
   })();
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const waitForSignedIn = useMemo(() => createWaitForSignedIn(supabase), [supabase]);
 
   const [mode, setMode] = useState<"password" | "otp">("password");
   const [email, setEmail] = useState("");
@@ -49,46 +87,30 @@ function LoginPageInner() {
     setError(null);
 
     try {
-      const waitForSignedIn = () =>
-        new Promise<void>((resolve) => {
-          let done = false;
-          let authSub: { unsubscribe: () => void } | null = null;
-          const timer = window.setTimeout(() => {
-            if (done) return;
-            done = true;
-            authSub?.unsubscribe();
-            resolve();
-          }, 1200);
-
-          const sub = supabase.auth.onAuthStateChange((event) => {
-            if (done) return;
-            if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-              done = true;
-              window.clearTimeout(timer);
-              authSub?.unsubscribe();
-              resolve();
-            }
-          });
-
-          authSub = sub?.data?.subscription ?? null;
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/sign-in", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
         });
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        setError(error.message);
+      } catch (fetchErr) {
+        setError(
+          fetchErr instanceof TypeError
+            ? "Could not reach this app (network or server). If you use a blocker, allow this site; ensure the dev server is running."
+            : "Login failed"
+        );
         return;
       }
 
-      // Defensive: ensure we actually received a session.
-      if (!data.session) {
-        setError("Signed in but no session returned. Check Supabase URL/Anon key and Auth settings.");
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(typeof payload.error === "string" ? payload.error : "Login failed");
         return;
       }
 
+      await supabase.auth.getSession();
       // Wait briefly for cookies/session propagation so middleware can see the session.
       await waitForSignedIn();
       router.replace(nextPath);
@@ -105,7 +127,7 @@ function LoginPageInner() {
   }
 
   async function onSendOtp() {
-    const target = otpTarget.trim();
+    const target = normalizeOtpTarget(otpTarget);
     if (!target) {
       setError("Enter your email or phone number first.");
       return;
@@ -116,23 +138,35 @@ function LoginPageInner() {
     setInfo(null);
     try {
       const isPhone = looksLikePhone(target);
-      const result = isPhone
-        ? await supabase.auth.signInWithOtp({
-            phone: target,
-            options: { shouldCreateUser: false },
-          })
-        : await supabase.auth.signInWithOtp({
-            email: target,
-            options: { shouldCreateUser: false },
-          });
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(isPhone ? { phone: target } : { email: target }),
+        });
+      } catch (fetchErr) {
+        setError(
+          fetchErr instanceof TypeError
+            ? "Could not reach this app (network or server). Auth runs through your server so Supabase is not blocked by the browser."
+            : "Failed to send OTP"
+        );
+        return;
+      }
 
-      if (result.error) {
-        setError(result.error.message);
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(typeof payload.error === "string" ? payload.error : "Failed to send OTP");
         return;
       }
 
       setOtpSentAt(Date.now());
-      setInfo(`OTP sent to ${target}. Enter it within 15 minutes.`);
+      setInfo(
+        isPhone
+          ? `OTP sent to ${target}. Enter the code from your SMS.`
+          : `We sent a 6-digit code to ${target}. Enter it below (passwordless sign-in uses the code, not a link). Check spam if it is slow.`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send OTP");
     } finally {
@@ -142,14 +176,10 @@ function LoginPageInner() {
 
   async function onVerifyOtp(e: React.FormEvent) {
     e.preventDefault();
-    const target = otpTarget.trim();
-    const token = otpCode.trim();
+    const target = normalizeOtpTarget(otpTarget);
+    const token = parseOtpDigits(otpCode);
     if (!target || !token) {
-      setError("Enter your email/phone and OTP code.");
-      return;
-    }
-    if (!otpSentAt || Date.now() - otpSentAt > OTP_TTL_MS) {
-      setError("OTP expired after 15 minutes. Request a new code.");
+      setError("Enter your email/phone and the 6-digit OTP code.");
       return;
     }
 
@@ -158,14 +188,28 @@ function LoginPageInner() {
     setInfo(null);
     try {
       const isPhone = looksLikePhone(target);
-      const { error } = await supabase.auth.verifyOtp(
-        isPhone
-          ? { phone: target, token, type: "sms" }
-          : { email: target, token, type: "email" }
-      );
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/verify-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(
+            isPhone ? { phone: target, token } : { email: target, token }
+          ),
+        });
+      } catch (fetchErr) {
+        setError(
+          fetchErr instanceof TypeError
+            ? "Could not reach this app (network or server)."
+            : "OTP verification failed"
+        );
+        return;
+      }
 
-      if (error) {
-        setError(error.message);
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(typeof payload.error === "string" ? payload.error : "OTP verification failed");
         return;
       }
 
@@ -173,6 +217,8 @@ function LoginPageInner() {
       setOtpCode("");
       setOtpSentAt(null);
 
+      await supabase.auth.getSession();
+      await waitForSignedIn();
       router.replace(nextPath);
       router.refresh();
       window.setTimeout(() => {
@@ -203,24 +249,17 @@ function LoginPageInner() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 sm:p-6 transition-colors">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-lg shadow-slate-200/50 dark:shadow-none transition-colors">
+    <div className="flex min-h-screen items-center justify-center bg-app-bg p-4 sm:p-6">
+      <div className="app-card w-full max-w-md p-8 shadow-md">
         <div className="flex flex-col items-center text-center">
-          <Image
-            src="/pinamungajan-logo.png"
-            alt="LGU Pinamungajan"
-            width={220}
-            height={80}
-            className="h-20 w-auto max-w-[85vw] object-contain drop-shadow-sm mb-5"
-            priority
-          />
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 leading-tight">HR Document System</h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-            Sign in to manage employee records, uploads, and reviews.
-          </p>
+          <div className="mb-6 drop-shadow-sm">
+            <BrandLogo variant="hero" priority />
+          </div>
+          <h1 className="text-2xl font-bold leading-tight text-app-text">HR document system</h1>
+          <p className="app-prose-muted mt-2 text-center">Sign in to manage employee records, uploads, and reviews.</p>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-2 rounded-xl border border-slate-200 p-1 dark:border-slate-700">
+        <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-app-border bg-app-surface-muted p-1">
           <button
             type="button"
             onClick={() => {
@@ -228,10 +267,10 @@ function LoginPageInner() {
               setError(null);
               setInfo(null);
             }}
-            className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+            className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${
               mode === "password"
-                ? "bg-blue-600 text-white"
-                : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                ? "bg-app-primary text-app-on-primary shadow-sm"
+                : "text-app-muted hover:bg-app-surface hover:text-app-text"
             }`}
           >
             Password
@@ -243,24 +282,24 @@ function LoginPageInner() {
               setError(null);
               setInfo(null);
             }}
-            className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+            className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${
               mode === "otp"
-                ? "bg-blue-600 text-white"
-                : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                ? "bg-app-primary text-app-on-primary shadow-sm"
+                : "text-app-muted hover:bg-app-surface hover:text-app-text"
             }`}
           >
-            OTP (Email/Phone)
+            OTP (email / phone)
           </button>
         </div>
 
         {mode === "password" ? (
           <form className="mt-8 space-y-5" onSubmit={onSubmit}>
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Email Address</label>
+              <label className="text-sm font-semibold text-app-text">Email address</label>
               <div className="relative mt-1.5 flex items-center">
-                <Mail className="absolute left-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                <Mail className="pointer-events-none absolute left-3 h-5 w-5 text-app-muted" />
                 <input
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white py-2.5 pl-10 pr-3 text-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-500"
+                  className="app-input pl-10"
                   type="email"
                   placeholder="hr@pinamungajan.gov.ph"
                   value={email}
@@ -271,11 +310,11 @@ function LoginPageInner() {
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Password</label>
+              <label className="text-sm font-semibold text-app-text">Password</label>
               <div className="relative mt-1.5 flex items-center">
-                <KeyRound className="absolute left-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                <KeyRound className="pointer-events-none absolute left-3 h-5 w-5 text-app-muted" />
                 <input
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white py-2.5 pl-10 pr-12 text-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="app-input pl-10 pr-12"
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
@@ -284,7 +323,7 @@ function LoginPageInner() {
                 />
                 <button
                   type="button"
-                  className="absolute right-3 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                  className="absolute right-3 p-1 text-app-muted transition-colors hover:text-app-text"
                   onClick={() => setShowPassword((v) => !v)}
                   title={showPassword ? "Hide password" : "Show password"}
                 >
@@ -293,17 +332,9 @@ function LoginPageInner() {
               </div>
             </div>
 
-            {error ? (
-              <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3 text-sm font-medium text-red-700 dark:text-red-400 text-center">
-                {error}
-              </div>
-            ) : null}
+            {error ? <div className="app-alert-danger text-center font-medium">{error}</div> : null}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition-all hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 disabled:opacity-70 disabled:hover:bg-blue-600"
-            >
+            <button type="submit" disabled={loading} className="app-btn-primary mt-2 w-full py-3 text-base font-semibold">
               {loading ? (
                 "Signing in..."
               ) : (
@@ -313,29 +344,22 @@ function LoginPageInner() {
                 </>
               )}
             </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={onGoogleSignIn}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-all hover:bg-slate-50 disabled:opacity-70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-            >
+            <button type="button" disabled={loading} onClick={onGoogleSignIn} className="app-btn-secondary w-full py-3">
               Continue with Google
             </button>
           </form>
         ) : (
           <form className="mt-8 space-y-5" onSubmit={onVerifyOtp}>
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                Email or Phone Number
-              </label>
+              <label className="text-sm font-semibold text-app-text">Email or phone number</label>
               <div className="relative mt-1.5 flex items-center">
                 {looksLikePhone(otpTarget) ? (
-                  <Smartphone className="absolute left-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                  <Smartphone className="pointer-events-none absolute left-3 h-5 w-5 text-app-muted" />
                 ) : (
-                  <Mail className="absolute left-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                  <Mail className="pointer-events-none absolute left-3 h-5 w-5 text-app-muted" />
                 )}
                 <input
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white py-2.5 pl-10 pr-3 text-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="app-input pl-10"
                   placeholder="user@email.com or +639XXXXXXXXX"
                   value={otpTarget}
                   onChange={(e) => setOtpTarget(e.target.value)}
@@ -345,11 +369,11 @@ function LoginPageInner() {
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">OTP Code</label>
+              <label className="text-sm font-semibold text-app-text">OTP code</label>
               <div className="relative mt-1.5 flex items-center">
-                <ShieldCheck className="absolute left-3 h-5 w-5 text-slate-400 dark:text-slate-500" />
+                <ShieldCheck className="pointer-events-none absolute left-3 h-5 w-5 text-app-muted" />
                 <input
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white py-2.5 pl-10 pr-3 text-sm tracking-[0.2em] transition-colors focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="app-input pl-10 tracking-[0.2em]"
                   placeholder="Enter OTP"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value)}
@@ -359,36 +383,31 @@ function LoginPageInner() {
             </div>
 
             {otpSentAt ? (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs font-medium text-blue-700">
-                OTP expires in{" "}
-                {Math.max(0, Math.ceil((OTP_TTL_MS - (nowMs - otpSentAt)) / 1000))}s (15-minute limit)
+              <div className="app-alert-info text-xs font-medium">
+                ~{Math.max(0, Math.ceil((OTP_DISPLAY_TTL_MS - (nowMs - otpSentAt)) / 1000))}s left to enter your code
               </div>
             ) : null}
 
             {info ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
+              <div className="rounded-xl border border-app-success/30 bg-app-success-muted p-3 text-sm font-medium text-app-success">
                 {info}
               </div>
             ) : null}
-            {error ? (
-              <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3 text-sm font-medium text-red-700 dark:text-red-400">
-                {error}
-              </div>
-            ) : null}
+            {error ? <div className="app-alert-danger font-medium">{error}</div> : null}
 
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={onSendOtp}
                 disabled={loading || !otpTarget.trim()}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                className="app-btn-secondary py-3 text-sm"
               >
                 Send OTP
               </button>
               <button
                 type="submit"
                 disabled={loading || !otpCode.trim()}
-                className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-70"
+                className="app-btn-primary py-3 text-sm font-semibold"
               >
                 Verify OTP
               </button>
@@ -403,7 +422,7 @@ function LoginPageInner() {
 export default function LoginPage() {
   return (
     <Suspense
-      fallback={<div className="min-h-screen bg-zinc-50 flex items-center justify-center p-6" />}
+      fallback={<div className="flex min-h-screen items-center justify-center bg-app-bg p-6 text-app-muted">Loading…</div>}
     >
       <LoginPageInner />
     </Suspense>

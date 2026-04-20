@@ -5,11 +5,28 @@ import { useEffect, useState } from "react";
 type StaffRow = {
   id: string;
   email: string | null;
+  phone: string | null;
   role: string;
   approved: boolean;
   last_sign_in_at: string | null;
   providers: string[];
 };
+
+function staffIdentityLabel(r: StaffRow): string {
+  if (r.email) return r.email;
+  if (r.phone) return `Phone: ${r.phone}`;
+  return "—";
+}
+
+async function readJsonError(res: Response, text: string): Promise<string> {
+  try {
+    const j = JSON.parse(text) as { error?: string };
+    if (typeof j.error === "string" && j.error.trim()) return j.error.trim();
+  } catch {
+    /* plain text */
+  }
+  return text.trim() || `Request failed (${res.status})`;
+}
 
 export function StaffManagementClient() {
   const [rows, setRows] = useState<StaffRow[]>([]);
@@ -21,9 +38,14 @@ export function StaffManagementClient() {
   async function load() {
     const res = await fetch("/api/admin/staff", { credentials: "include" });
     const text = await res.text();
-    if (!res.ok) throw new Error(text || "Failed to load staff");
+    if (!res.ok) throw new Error(await readJsonError(res, text));
     const json = JSON.parse(text) as { users: StaffRow[] };
-    setRows((json.users || []).sort((a, b) => a.email?.localeCompare(b.email || "") || 0));
+    const list = json.users || [];
+    setRows(
+      list.sort((a, b) =>
+        staffIdentityLabel(a).toLowerCase().localeCompare(staffIdentityLabel(b).toLowerCase())
+      )
+    );
   }
 
   useEffect(() => {
@@ -38,18 +60,23 @@ export function StaffManagementClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       const text = await res.text();
-      if (!res.ok) throw new Error(text || "Failed to save staff");
-      const json = JSON.parse(text) as { mode: string; generatedPassword: string | null };
+      if (!res.ok) throw new Error(await readJsonError(res, text));
+      const json = JSON.parse(text) as {
+        mode: string;
+        email?: string;
+        generatedPassword: string | null;
+      };
       setEmail("");
       setPassword("");
-      setMessage(
-        json.generatedPassword
-          ? `HR staff created. Generated password: ${json.generatedPassword}`
-          : `Staff ${json.mode}.`
-      );
+      const lines: string[] = [];
+      lines.push(`Staff ${json.mode}.`);
+      if (json.generatedPassword) {
+        lines.push(`Password (copy now): ${json.generatedPassword}`);
+      }
+      setMessage(lines.join(" "));
       await load();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -68,7 +95,7 @@ export function StaffManagementClient() {
         credentials: "include",
       });
       const text = await res.text();
-      if (!res.ok) throw new Error(text || "Delete failed");
+      if (!res.ok) throw new Error(await readJsonError(res, text));
       setMessage("Staff deleted.");
       await load();
     } catch (e) {
@@ -89,7 +116,7 @@ export function StaffManagementClient() {
         body: JSON.stringify({ user_id: userId, action: "approve", role: "hr" }),
       });
       const text = await res.text();
-      if (!res.ok) throw new Error(text || "Approval failed");
+      if (!res.ok) throw new Error(await readJsonError(res, text));
       setMessage("User approved as HR staff.");
       await load();
     } catch (e) {
@@ -100,72 +127,85 @@ export function StaffManagementClient() {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">HR staff accounts</h2>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-        Admin can create HR staff accounts, promote existing users to HR, and delete HR staff.
+    <section className="app-card p-6 sm:p-8">
+      <h2 className="text-base font-semibold text-app-text">HR staff accounts</h2>
+      <p className="app-prose-muted mt-1">
+        Create HR accounts, promote existing users, approve pending sign-ups, or remove access.
       </p>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="staff@email.com"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+          placeholder="Work email (required)"
+          className="app-input"
+          autoComplete="off"
         />
         <input
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Optional password (leave blank = auto)"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+          placeholder="Password (optional — auto-generated if empty)"
+          className="app-input"
+          autoComplete="new-password"
         />
         <button
           disabled={loading || !email.trim()}
           onClick={createOrPromote}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+          className="app-btn-primary"
         >
-          Add / Promote HR
+          Add or promote HR
         </button>
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">
-        Google sign-in support: enable Google provider in Supabase Auth. After a user signs in with Google once,
-        use this panel to set role to HR by entering the same email and leaving password blank.
+      <p className="app-prose-muted mt-3 text-xs">
+        Use a real work email so OTP and password reset can be delivered. Google sign-in: enable the Google provider in
+        Supabase Auth; after a user signs in once, enter the same email here with a blank password to assign the HR
+        role. Users who only have a phone on their account show under &quot;Email / phone&quot; as{" "}
+        <span className="font-medium text-app-text">Phone: …</span>. Auto-generated placeholder emails (if you add them
+        later) are for masterlist employee records only, not for HR login accounts.
       </p>
 
       {message ? (
-        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm dark:border-slate-700 dark:bg-slate-800">
-          {message}
-        </div>
+        <div className="app-alert-info mt-4 text-sm whitespace-pre-wrap">{message}</div>
       ) : null}
 
-      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+      <div className="app-table-wrap mt-6 overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-100 dark:bg-slate-800">
+          <thead className="app-table-head">
             <tr>
-              <th className="px-3 py-2 text-left">Email</th>
-              <th className="px-3 py-2 text-left">Role</th>
-              <th className="px-3 py-2 text-left">Approved</th>
-              <th className="px-3 py-2 text-left">Providers</th>
-              <th className="px-3 py-2 text-left">Last sign in</th>
-              <th className="px-3 py-2 text-left">Action</th>
+              <th className="px-3 py-3 text-left">Email / phone</th>
+              <th className="px-3 py-3 text-left">Role</th>
+              <th className="px-3 py-3 text-left">Approved</th>
+              <th className="px-3 py-3 text-left">Providers</th>
+              <th className="px-3 py-3 text-left">Last sign in</th>
+              <th className="px-3 py-3 text-left">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+          <tbody className="divide-y divide-app-border">
             {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="px-3 py-2">{r.email || "—"}</td>
-                <td className="px-3 py-2">{r.role || "none"}</td>
-                <td className="px-3 py-2">{r.approved ? "yes" : "no"}</td>
-                <td className="px-3 py-2">{r.providers.join(", ") || "email"}</td>
-                <td className="px-3 py-2">{r.last_sign_in_at ? new Date(r.last_sign_in_at).toLocaleString() : "—"}</td>
-                <td className="px-3 py-2">
+              <tr key={r.id} className="text-app-text">
+                <td className="px-3 py-2.5">
+                  {r.email ? (
+                    <span>{r.email}</span>
+                  ) : r.phone ? (
+                    <span className="text-app-muted">{staffIdentityLabel(r)}</span>
+                  ) : (
+                    <span className="text-app-muted">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5">{r.role || "none"}</td>
+                <td className="px-3 py-2.5">{r.approved ? "yes" : "no"}</td>
+                <td className="px-3 py-2.5">{r.providers.join(", ") || "—"}</td>
+                <td className="px-3 py-2.5">
+                  {r.last_sign_in_at ? new Date(r.last_sign_in_at).toLocaleString() : "—"}
+                </td>
+                <td className="px-3 py-2.5">
                   {r.role === "hr" && r.approved ? (
                     <div className="flex gap-2">
                       <button
                         disabled={loading}
                         onClick={() => removeUser(r.id)}
-                        className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                        className="rounded-lg bg-app-danger px-2.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
                       >
                         Delete
                       </button>
@@ -175,27 +215,27 @@ export function StaffManagementClient() {
                       <button
                         disabled={loading}
                         onClick={() => approveUser(r.id)}
-                        className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                        className="rounded-lg bg-app-success px-2.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
                       >
                         Approve as HR
                       </button>
                       <button
                         disabled={loading}
                         onClick={() => removeUser(r.id)}
-                        className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                        className="rounded-lg bg-app-danger px-2.5 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
                       >
                         Reject/Delete
                       </button>
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-400">Not deletable here</span>
+                    <span className="text-xs text-app-muted">Not deletable here</span>
                   )}
                 </td>
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td className="px-3 py-4 text-center text-slate-500" colSpan={6}>
+                <td className="px-3 py-8 text-center text-app-muted" colSpan={6}>
                   No users found.
                 </td>
               </tr>
@@ -206,4 +246,3 @@ export function StaffManagementClient() {
     </section>
   );
 }
-
