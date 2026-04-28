@@ -62,10 +62,23 @@
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--app-bg);
   color: var(--app-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 * {
@@ -74,8 +87,16 @@ body {
 
 /* ── Reusable patterns ──────────────────────────────────────────────── */
 @layer components {
+  .app-skip {
+    @apply fixed left-4 top-4 z-[100] -translate-y-16 rounded-lg bg-app-primary px-4 py-2 text-sm font-semibold text-app-on-primary opacity-0 shadow-md transition focus:translate-y-0 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-app-ring/50;
+  }
+
+  .app-page-desc {
+    @apply mt-2 max-w-2xl text-sm leading-relaxed text-app-muted sm:text-base;
+  }
+
   .app-card {
-    @apply rounded-2xl border border-app-border bg-app-surface shadow-sm;
+    @apply rounded-2xl border border-app-border bg-app-surface shadow-sm transition-shadow duration-200;
   }
 
   .app-card-header {
@@ -107,7 +128,7 @@ body {
   }
 
   .app-input {
-    @apply w-full rounded-xl border border-app-border bg-app-surface px-3 py-2.5 text-sm text-app-text placeholder:text-app-muted/75 transition-colors focus:border-app-primary focus:outline-none focus:ring-2 focus:ring-app-ring/25;
+    @apply min-h-11 w-full rounded-xl border border-app-border bg-app-surface px-3 py-2.5 text-sm text-app-text placeholder:text-app-muted/75 transition-colors focus:border-app-primary focus:outline-none focus:ring-2 focus:ring-app-ring/25;
   }
 
   .app-link {
@@ -135,7 +156,7 @@ body {
   }
 
   .app-nav-link {
-    @apply flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-app-muted transition-colors hover:bg-app-primary/10 hover:text-app-primary;
+    @apply flex min-h-11 shrink-0 items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-app-muted transition-colors hover:bg-app-primary/10 hover:text-app-primary;
   }
 
   .app-nav-link-active {

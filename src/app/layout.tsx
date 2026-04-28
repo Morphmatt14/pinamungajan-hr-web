@@ -12,8 +12,11 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Pinamungajan HR",
-  description: "HR document intake, review, and masterlist",
+  title: {
+    default: "Pinamungajan HR",
+    template: "%s · Pinamungajan HR",
+  },
+  description: "Document intake, record review, and employee masterlist for LGU Human Resources",
   icons: {
     icon: [{ url: "/pinamungajan-logo.png", type: "image/png" }],
     apple: [{ url: "/pinamungajan-logo.png" }],
@@ -31,6 +34,9 @@ export default function RootLayout({
         className={`${inter.variable} font-sans antialiased min-h-screen bg-app-bg text-app-text transition-colors`}
         suppressHydrationWarning
       >
+        <a href="#main-content" className="app-skip">
+          Skip to main content
+        </a>
         <DevHydrationExtensionNote />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}

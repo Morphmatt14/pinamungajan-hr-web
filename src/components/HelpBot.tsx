@@ -9,7 +9,7 @@ export function HelpBot() {
   const [messages, setMessages] = useState<{ role: "bot" | "user"; text: string }[]>([
     {
       role: "bot",
-      text: "Hello! I am the Pinamungajan HR assistant. How can I help you today?",
+      text: "Hi — I can give quick tips about scanning, uploads, and where to go in the menu. What are you trying to do?",
     },
   ]);
   const [inputMessage, setInputMessage] = useState("");
@@ -26,7 +26,7 @@ export function HelpBot() {
         ...prev,
         {
           role: "bot",
-          text: "I am a helpful assistant for Pinamungajan HR. For support with documents, ensure they are scanned clearly before uploading. If you encounter errors, check your network connection or contact IT support.",
+          text: "For documents: use clear scans, good lighting, and straight pages before upload. If something fails, check your network and try again, or ask your IT or HR contact for help with this app.",
         },
       ]);
     }, 1000);
@@ -37,9 +37,9 @@ export function HelpBot() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full border border-app-border bg-app-surface shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95 ${isOpen ? "hidden" : "flex"}`}
-        title="Help"
-        aria-label="Open help assistant"
+        className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full border border-app-border bg-app-surface shadow-lg transition-all hover:scale-105 hover:shadow-xl active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-ring/50 ${isOpen ? "hidden" : "flex"}`}
+        title="Help and quick tips"
+        aria-label="Open help and quick tips"
       >
         <BrandLogo variant="floating" className="pointer-events-none" />
       </button>

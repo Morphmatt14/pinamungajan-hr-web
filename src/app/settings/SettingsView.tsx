@@ -19,7 +19,13 @@ export async function SettingsView() {
     .single();
 
   if (error) {
-    return <div className="app-alert-danger text-sm">Error: {error.message}</div>;
+    return (
+      <div className="app-alert-danger max-w-xl" role="alert">
+        <p className="font-medium text-app-text">Could not load settings</p>
+        <p className="mt-1 text-sm text-app-text/90">{error.message}</p>
+        <p className="mt-2 text-sm text-app-muted">If this continues, check your connection and try again in a few minutes.</p>
+      </div>
+    );
   }
 
   const s = data as SettingsRow;
@@ -29,7 +35,11 @@ export async function SettingsView() {
       <NormalizePdsToggle initialEnabled={initialEnabled} />
       <section className="app-card p-5 sm:p-6">
         <h2 className="text-base font-semibold text-app-text">Defaults</h2>
-        <dl className="mt-4 grid gap-3 text-sm">
+        <p className="app-prose-muted mt-1 text-sm">
+          Values used for validation and rules in this project. Shown for reference; editing here is not available in
+          the web app yet.
+        </p>
+        <dl className="mt-5 grid gap-3 text-sm">
           <div className="flex flex-wrap justify-between gap-2 border-b border-app-border pb-3">
             <dt className="text-app-muted">SG range</dt>
             <dd className="font-medium text-app-text">

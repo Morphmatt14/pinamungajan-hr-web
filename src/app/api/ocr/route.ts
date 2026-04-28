@@ -30,6 +30,7 @@ import { PDFDocument } from "pdf-lib";
 import { detectDocumentType, type DocumentType, getDocumentCategory } from "@/lib/document/detection";
 import { extractAppointmentFields, parseAppointmentDate } from "@/lib/appointment/fieldExtract";
 import { extractPdsOwnerFromTextFallback } from "@/lib/ownerDetect/pdsOwner";
+import { resolveOwnerEmployeeForOcrNameMatches } from "@/lib/owner/resolveOwnerLink";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -736,15 +737,18 @@ export async function POST(request: Request) {
           .ilike("first_name", first)
           .limit(25);
 
-        const filtered = (candidates || []).filter((c: any) => {
+        const nameKeyMatches = (candidates || []).filter((c: any) => {
           const cKey = normalizeNameForMatch(`${c.last_name || ""} ${c.first_name || ""} ${c.middle_name || ""}`);
           return cKey === normKey;
         });
 
-        if (filtered.length === 1) {
-          ownerEmployeeId = String(filtered[0].id);
-          
-          // Update masterlist with appointment fields (ONLY appointment updates these)
+        const appointmentResolve = resolveOwnerEmployeeForOcrNameMatches(nameKeyMatches, null);
+        if (appointmentResolve.warning) ownerLinkWarning = appointmentResolve.warning;
+
+        if (appointmentResolve.id) {
+          ownerEmployeeId = String(appointmentResolve.id);
+
+          // Update masterlist with appointment fields (ONLY appointment updates these) — one unambiguous person only
           const patch: any = {};
           if (appointmentData.position_title) patch.position_title = appointmentData.position_title;
           if (appointmentData.office_department) patch.office_department = appointmentData.office_department;
@@ -752,7 +756,7 @@ export async function POST(request: Request) {
           if (appointmentData.step) patch.step = appointmentData.step;
           if (appointmentData.monthly_salary) patch.monthly_salary = appointmentData.monthly_salary;
           if (appointmentData.annual_salary) patch.annual_salary = appointmentData.annual_salary;
-          
+
           if (appointmentData.appointment_date) {
             patch.date_hired = appointmentData.appointment_date;
             const hireDate = new Date(appointmentData.appointment_date);
@@ -762,15 +766,11 @@ export async function POST(request: Request) {
             patch.tenure_years = Math.floor(diffDays / 365);
             patch.tenure_months = Math.floor((diffDays % 365) / 30);
           }
-          
+
           if (Object.keys(patch).length > 0) {
             if (updatedById) patch.updated_by = updatedById;
             await supabase.from("employees").update(patch).eq("id", ownerEmployeeId);
           }
-        } else if (filtered.length > 1) {
-          ownerLinkWarning = `Multiple matches found (${filtered.length}). Please confirm correct employee.`;
-        } else {
-          ownerLinkWarning = "No matching employee found. Create new employee to link.";
         }
       }
     }
@@ -871,35 +871,36 @@ export async function POST(request: Request) {
           .ilike("first_name", first)
           .limit(25);
 
-        const filtered = (candidates || []).filter((c: any) => {
+        const nameKeyMatches = (candidates || []).filter((c: any) => {
           const cKey = normalizeNameForMatch(`${c.last_name || ""} ${c.first_name || ""} ${c.middle_name || ""}`);
-          if (cKey !== normKey) return false;
-          if (dobIso) return String(c.date_of_birth || "") === dobIso;
-          return true;
+          return cKey === normKey;
         });
 
-        if (filtered.length === 1) {
-          ownerEmployeeId = String(filtered[0].id);
-          // PDS ONLY updates personal fields - NEVER job fields
+        const pdsResolve = resolveOwnerEmployeeForOcrNameMatches(
+          nameKeyMatches,
+          dobIso ? String(dobIso).trim() || null : null
+        );
+        if (pdsResolve.warning) ownerLinkWarning = pdsResolve.warning;
+
+        if (pdsResolve.id) {
+          ownerEmployeeId = String(pdsResolve.id);
+          const row = nameKeyMatches.find((c: any) => String(c.id) === ownerEmployeeId);
+          // PDS ONLY updates personal fields - NEVER job fields; only for the resolved single person
           const patch: any = {};
           const detectedGender = (ownerCandidate as any).gender ?? null;
           const computedAge = dobIso ? computeAgeAndGroupFromDobIso(dobIso) : { age: null, age_group: null };
-          
-          if (dobIso && !filtered[0].date_of_birth) patch.date_of_birth = dobIso;
-          if (detectedGender && !filtered[0].gender) patch.gender = detectedGender;
-          if (computedAge.age !== null && !filtered[0].age) {
+
+          if (dobIso && row && !row.date_of_birth) patch.date_of_birth = dobIso;
+          if (detectedGender && row && !row.gender) patch.gender = detectedGender;
+          if (computedAge.age !== null && row && !row.age) {
             patch.age = computedAge.age;
             patch.age_group = computedAge.age_group;
           }
-          
+
           if (Object.keys(patch).length > 0) {
             if (updatedById) patch.updated_by = updatedById;
             await supabase.from("employees").update(patch).eq("id", ownerEmployeeId);
           }
-        } else if (filtered.length > 1) {
-          ownerLinkWarning = `Multiple matches found (${filtered.length}). Please confirm correct employee.`;
-        } else {
-          ownerLinkWarning = "No matching employee found. Create new employee to link.";
         }
       }
     }

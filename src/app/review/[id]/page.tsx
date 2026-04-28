@@ -11,6 +11,8 @@ import { DebugExtractionPanel } from "@/app/review/[id]/DebugExtractionPanel";
 import { DocTypePanel } from "@/app/review/[id]/DocTypePanel";
 import { isAdminUser } from "@/lib/auth/roles";
 
+export const dynamic = "force-dynamic";
+
 export default async function ReviewDetailPage({
   params,
 }: {
@@ -25,8 +27,14 @@ export default async function ReviewDetailPage({
 
   if (!user || !isAdminUser(user)) {
     return (
-      <AppShell title="Review extraction">
-        <div className="app-alert-warning text-sm">Only administrator accounts can open review details.</div>
+      <AppShell
+        title="Review extraction"
+        description="This screen is for administrators who verify extractions for a document."
+      >
+        <div className="app-card max-w-2xl p-5 sm:p-6 text-sm text-app-muted">
+          Only administrator accounts can open review details. Use the <strong>Review queue</strong> from the menu
+          as an admin.
+        </div>
       </AppShell>
     );
   }
@@ -93,9 +101,15 @@ export default async function ReviewDetailPage({
   }
 
   return (
-    <AppShell title="Review Extraction">
+    <AppShell
+      title="Review extraction"
+      description="Check fields, run OCR if needed, then commit to the masterlist when the record is correct."
+    >
       {error ? (
-        <div className="rounded-lg border bg-white p-4 text-sm text-red-700">{error.message}</div>
+        <div className="app-alert-danger max-w-xl" role="alert">
+          <p className="font-medium">We couldn’t load this extraction</p>
+          <p className="mt-1 text-sm">{error.message}</p>
+        </div>
       ) : (
         <div className="grid gap-4">
           <div className="rounded-xl border bg-white p-4 text-sm shadow-sm">
