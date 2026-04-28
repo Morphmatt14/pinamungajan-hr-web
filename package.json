@@ -10,7 +10,7 @@
     "setup:gcp:auto": "node scripts/setup-gcp.mjs --yes",
     "setup:admin": "node scripts/setup-admin-user.mjs",
     "dev": "cmd /c \"set NEXT_DISABLE_TURBOPACK=1&& next dev\"",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "pds:png": "node scripts/generate-pds-template-png.mjs"
