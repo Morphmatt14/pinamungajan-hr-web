@@ -2,6 +2,9 @@
   "name": "pinamungajan-hr-web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "setup:gcp": "node scripts/setup-gcp.mjs",
     "setup:gcp:auto": "node scripts/setup-gcp.mjs --yes",

@@ -5,6 +5,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactCompiler: false,
   serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
+  // Pin workspace root when another lockfile exists above this app (e.g. parent folder). Prevents wrong root on Vercel/local.
   turbopack: {
     root: __dirname,
   },
