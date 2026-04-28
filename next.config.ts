@@ -20,6 +20,18 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
+  /**
+   * Split deploy: Vercel serves the Next.js UI; Render runs the same app as the API host.
+   * When BACKEND_URL is set (e.g. on Vercel), all /api/* requests are proxied there before local route handlers.
+   * Leave BACKEND_URL unset locally and on Render so /api stays on the same server.
+   */
+  async rewrites() {
+    const backend = (process.env.BACKEND_URL || "").trim().replace(/\/$/, "");
+    if (!backend) return [];
+    return {
+      beforeFiles: [{ source: "/api/:path*", destination: `${backend}/api/:path*` }],
+    };
+  },
 };
 
 export default nextConfig;
