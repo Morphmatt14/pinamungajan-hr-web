@@ -3,12 +3,17 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  createSupabaseBrowserClientFromEnv,
+  getSupabaseBrowserEnv,
+  type SupabaseBrowserEnv,
+} from "@/lib/supabase/client";
 import { getAdminPath, getAdminLoginPath, isAdminAppPath } from "@/lib/urls";
 import { BrandLogo } from "@/components/BrandLogo";
 import { Mail, KeyRound, Eye, EyeOff, LogIn, Shield } from "lucide-react";
 
-function createWaitForSignedIn(supabase: ReturnType<typeof createSupabaseBrowserClient>) {
+function createWaitForSignedIn(supabase: SupabaseClient) {
   return () =>
     new Promise<void>((resolve) => {
       let done = false;
@@ -36,7 +41,38 @@ function createWaitForSignedIn(supabase: ReturnType<typeof createSupabaseBrowser
 
 type LoginViewMode = "staff" | "admin";
 
-export function LoginView({ mode }: { mode: LoginViewMode }) {
+function LoginConfigMissing({ mode }: { mode: LoginViewMode }) {
+  const isAdmin = mode === "admin";
+  return (
+    <div
+      className={
+        isAdmin
+          ? "flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-200 via-slate-100 to-slate-200 p-4 sm:p-6 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950"
+          : "flex min-h-screen items-center justify-center bg-app-bg p-4 sm:p-6"
+      }
+    >
+      <div
+        className={
+          isAdmin
+            ? "w-full max-w-md rounded-2xl border border-amber-500/40 bg-app-surface p-8 shadow-lg"
+            : "app-card w-full max-w-md p-8 shadow-md"
+        }
+        role="alert"
+      >
+        <h1 className="text-xl font-bold text-app-text">Sign-in is not configured</h1>
+        <p className="mt-3 text-sm leading-relaxed text-app-muted">
+          This deployment is missing{" "}
+          <code className="rounded bg-app-surface-muted px-1 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_URL</code> and/or{" "}
+          <code className="rounded bg-app-surface-muted px-1 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
+          Add both under your host&apos;s environment variables (for Vercel: Project → Settings → Environment Variables),
+          then redeploy.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LoginViewInner({ mode, env }: { mode: LoginViewMode; env: SupabaseBrowserEnv }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const adminPath = getAdminPath();
@@ -56,7 +92,7 @@ export function LoginView({ mode }: { mode: LoginViewMode }) {
   const isAdminLogin = mode === "admin" || isAdminAppPath(nextPath);
   const staffLoginHref = searchParams.get("next") && mode === "admin" ? "/login" : "/";
 
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const supabase = useMemo(() => createSupabaseBrowserClientFromEnv(env), [env.url, env.anonKey]);
   const waitForSignedIn = useMemo(() => createWaitForSignedIn(supabase), [supabase]);
 
   const [email, setEmail] = useState("");
@@ -251,4 +287,12 @@ export function LoginView({ mode }: { mode: LoginViewMode }) {
       </div>
     </div>
   );
+}
+
+export function LoginView({ mode }: { mode: LoginViewMode }) {
+  const env = useMemo(() => getSupabaseBrowserEnv(), []);
+  if (!env) {
+    return <LoginConfigMissing mode={mode} />;
+  }
+  return <LoginViewInner mode={mode} env={env} />;
 }
